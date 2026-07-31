@@ -122,6 +122,8 @@ The `--provider` flag filters any command to a single provider: `codeburn report
 
 **Gemini CLI** stores sessions as single JSON files. Each session embeds real token counts (input, output, cached, thoughts) per message, so no estimation is needed. Gemini reports input tokens inclusive of cached; CodeBurn subtracts cached from input before pricing to avoid double charging.
 
+**Codex** writes its own turn labels into `turn_context.model` instead of a model id, so `codex-auto-review` and bare `codex` turns match no price entry. They are priced as approximations (against GPT-5.5 and GPT-5 respectively) and keep their own rows in the model breakdown, so the spend is counted without being misattributed. Redirect either with `codeburn model-alias`.
+
 **Kiro** stores conversations as `.chat` JSON files. Token counts are estimated from content length. The underlying model is not exposed, so sessions are labeled `kiro-auto` and costed at Sonnet rates.
 
 **GitHub Copilot** reads from both `~/.copilot/session-state/` (legacy CLI) and VS Code's `workspaceStorage/*/GitHub.copilot-chat/transcripts/`. The VS Code format has no explicit token counts; tokens are estimated from content length and the model is inferred from tool call ID prefixes.
@@ -136,7 +138,7 @@ Adding a new provider is a single file. See `src/providers/codex.ts` for an exam
 
 ### Cost Tracking
 
-Prices every API call using input, output, cache read, cache write, and web search token counts. Fast mode multiplier for Claude. Pricing fetched from [LiteLLM](https://github.com/BerriAI/litellm) and cached locally for 24 hours. Hardcoded fallbacks for all Claude and GPT models to prevent mispricing.
+Prices every API call using input, output, cache read, cache write, and web search token counts. See [Pricing](#pricing) for where the prices come from and what happens to models it cannot price.
 
 ### Task Categories
 
@@ -168,7 +170,11 @@ For categories that involve code edits, CodeBurn detects edit/test/fix retry cyc
 
 ### Pricing
 
-Fetched from [LiteLLM](https://github.com/BerriAI/litellm) model prices (auto-cached 24 hours at `~/.cache/codeburn/`). Handles input, output, cache write, cache read, and web search costs. Fast mode multiplier for Claude. Hardcoded fallbacks for all Claude and GPT-5 models to prevent fuzzy matching mispricing.
+Fetched from [LiteLLM](https://github.com/BerriAI/litellm) model prices (auto-cached 24 hours at `~/.cache/codeburn/`). Handles input, output, cache write, cache read, and web search costs. Fast mode multiplier for Claude.
+
+A full LiteLLM price snapshot is bundled at publish time, so every model in it prices correctly with no network at all. If the refresh fails (offline, proxy, `raw.githubusercontent.com` unreachable), CodeBurn falls back to that snapshot and says so on stderr instead of quietly serving prices it could not verify. A model name that matches no price entry exactly resolves to the longest matching prefix, so a lookup never depends on LiteLLM's arbitrary key ordering.
+
+A model CodeBurn cannot price is counted as `$0.00`, which reads exactly like "this was free". So after every command it names the unpriced models on stderr — stderr specifically, so `--format json` stdout stays machine-readable — and points at the per-model breakdown, which shows their real call counts against `$0.00`. See [Model Aliases](#model-aliases) to price one yourself.
 
 ### Optimize
 
@@ -233,7 +239,7 @@ Correlates AI sessions with git commits by timestamp:
 | Reverted | Commits were later reverted |
 | Abandoned | No commits near session, or commits never merged |
 
-Requires a git repository. Run from your project directory.
+Each project is correlated against the repository it actually ran in, taken from the working directory recorded in its transcript. Projects whose transcripts record no path fall back to the current directory, which then has to be a git repository.
 
 ### Plans
 
@@ -263,7 +269,7 @@ Any [ISO 4217 currency code](https://en.wikipedia.org/wiki/ISO_4217#List_of_ISO_
 
 ### Model Aliases
 
-If you see `$0.00` for some models, the model name reported by your provider does not match any entry in the LiteLLM pricing data. This commonly happens when using a proxy that rewrites model names.
+If a model shows `$0.00`, its name does not match any entry in the LiteLLM pricing data — commonly because a proxy rewrites model names. CodeBurn names every such model on stderr after the command, so you never have to spot the zero yourself. Map it to a model that is priced:
 
 ```bash
 codeburn model-alias "my-proxy-model" "claude-opus-4-6"   # add alias
@@ -271,7 +277,7 @@ codeburn model-alias --list                                # show configured ali
 codeburn model-alias --remove "my-proxy-model"             # remove alias
 ```
 
-Aliases are stored in `~/.config/codeburn/config.json` and applied at runtime before pricing lookup. The target name can be anything in the [LiteLLM model list](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) or a canonical name from the fallback table (e.g. `claude-sonnet-4-6`, `claude-opus-4-5`, `gpt-4o`). Built-in aliases ship for known proxy model name variants. User-configured aliases take precedence over built-ins.
+Aliases are stored in `~/.config/codeburn/config.json` and applied at runtime before pricing lookup. The target name can be anything in the [LiteLLM model list](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) or in the bundled price snapshot (e.g. `claude-sonnet-4-6`, `claude-opus-4-5`, `gpt-4o`). Built-in aliases ship for known proxy model name variants and for agent turn labels that are not model ids at all (see the Codex note under [Provider Notes](#provider-notes)). User-configured aliases take precedence over built-ins.
 
 ### Filtering
 
@@ -350,9 +356,9 @@ These are starting points, not verdicts. A 60% cache hit on a single experimenta
 
 ## How It Reads Data
 
-**Claude Code** stores session transcripts as JSONL at `~/.claude/projects/<sanitized-path>/<session-id>.jsonl`. Each assistant entry contains model name, token usage (input, output, cache read, cache write), tool_use blocks, and timestamps.
+**Claude Code** stores session transcripts as JSONL at `~/.claude/projects/<sanitized-path>/<session-id>.jsonl`. Each assistant entry contains model name, token usage (input, output, cache read, cache write), tool_use blocks, and timestamps. That directory name replaces every non-alphanumeric character with `-`, so it cannot be decoded back into a path; the real project path comes from the `cwd` recorded on the session's first entry, and where none was recorded the directory name is shown as-is rather than a fabricated path.
 
-**Codex** stores sessions at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` with `token_count` events containing per-call and cumulative token usage, and `function_call` entries for tool tracking.
+**Codex** stores sessions at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` with `token_count` events containing per-call and cumulative token usage, and `function_call` entries for tool tracking. The project path comes from `session_meta.cwd`.
 
 **Cursor** stores session data in a SQLite database at `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` (macOS), `~/.config/Cursor/User/globalStorage/state.vscdb` (Linux), or `%APPDATA%/Cursor/User/globalStorage/state.vscdb` (Windows). Token counts are in `cursorDiskKV` table entries with `bubbleId:` key prefix. Requires `better-sqlite3` (installed as optional dependency). Parsed results are cached at `~/.cache/codeburn/cursor-results.json` and auto-invalidate when the database changes.
 
