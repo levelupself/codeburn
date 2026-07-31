@@ -25,6 +25,11 @@ const { version } = require('../package.json')
 import { loadCurrency, getCurrency, isValidCurrencyCode } from './currency.js'
 
 async function hydrateCache() {
+  // Hydration persists per-day costs, so it has to run against the live price table --
+  // otherwise a model LiteLLM knows about but the bundled snapshot does not gets frozen
+  // into the cache at $0 even though the fetch succeeded. Every hydrating command loads
+  // pricing here rather than each call site remembering to, so the ordering cannot drift.
+  await loadPricing()
   try {
     return await ensureCacheHydrated(
       (range) => parseAllSessions(range, 'all'),

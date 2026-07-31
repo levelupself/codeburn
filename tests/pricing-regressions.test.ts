@@ -178,3 +178,41 @@ describe('D2: priced pseudo-models keep their own identity', () => {
     expect(getShortModelName('codex-mini-latest')).not.toBe('Codex')
   })
 })
+
+// D3 -- longest-prefix-wins has to scan the whole price table, so lookups are memoised.
+// A memo is only as correct as its invalidation: if it outlives a change to the alias
+// table or the price table, a user's `codeburn model-alias` override silently keeps
+// resolving to the old price, which is the same class of quietly-wrong number this whole
+// change set exists to remove.
+describe('D3: memoised lookups follow their inputs', () => {
+  it('re-resolves a model after a user alias is added', () => {
+    const builtin = getModelCosts('gpt-5.6-codex')
+    expect(builtin).toEqual(getModelCosts('gpt-5.6'))
+
+    setModelAliases({ 'gpt-5.6-codex': 'gpt-5' })
+    expect(getModelCosts('gpt-5.6-codex')).toEqual(getModelCosts('gpt-5'))
+  })
+
+  it('re-resolves a model after a user alias is removed', () => {
+    setModelAliases({ 'gpt-5.6-codex': 'gpt-5' })
+    expect(getModelCosts('gpt-5.6-codex')).toEqual(getModelCosts('gpt-5'))
+
+    setModelAliases({})
+    expect(getModelCosts('gpt-5.6-codex')).toEqual(getModelCosts('gpt-5.6'))
+  })
+
+  it('does not keep serving a miss that an alias has since fixed', () => {
+    // Misses are cached too -- an unpriced model scans the whole table before being
+    // recorded -- so the negative entry has to be dropped along with the positive ones.
+    expect(getModelCosts('house-brand-model')).toBeNull()
+
+    setModelAliases({ 'house-brand-model': 'claude-opus-5' })
+    expect(getModelCosts('house-brand-model')).toEqual(getModelCosts('claude-opus-5'))
+  })
+
+  it('still records a repeat unpriced model even when the lookup is memoised', () => {
+    calculateCost('unknown-memoised', 100, 0, 0, 0, 0)
+    calculateCost('unknown-memoised', 100, 0, 0, 0, 0)
+    expect(getUnpricedModels()).toEqual(['unknown-memoised'])
+  })
+})

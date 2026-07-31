@@ -49,6 +49,19 @@ function loadSnapshot(): Map<string, ModelCosts> {
 
 let pricingCache: Map<string, ModelCosts> = loadSnapshot()
 
+/// Resolved lookups, keyed by the raw model string. A prefix lookup has to scan the whole
+/// price table (longest-prefix-wins is deliberately exhaustive, see `resolveModelCosts`),
+/// and every API call of every session parse pays it. Misses are cached too: an unpriced
+/// model scans the full table before `recordUnpriced` and is the hottest miss there is.
+/// Only valid while both inputs to the resolution are unchanged, so it is cleared whenever
+/// the price table or the alias table is replaced.
+const modelCostsMemo = new Map<string, ModelCosts | null>()
+
+function setPricingCache(pricing: Map<string, ModelCosts>): void {
+  pricingCache = pricing
+  modelCostsMemo.clear()
+}
+
 let pricingIsStale = false
 let pricingStaleReason = ''
 
@@ -136,15 +149,25 @@ async function loadCachedPricing(): Promise<Map<string, ModelCosts> | null> {
   }
 }
 
-export async function loadPricing(): Promise<void> {
+let pricingLoad: Promise<void> | null = null
+
+/// Idempotent: the price table is process-global, so loading it more than once only
+/// repeats work. Commands can therefore call this wherever pricing is needed -- notably
+/// before anything that persists a computed cost -- without tracking who called it first.
+export function loadPricing(): Promise<void> {
+  pricingLoad ??= loadPricingOnce()
+  return pricingLoad
+}
+
+async function loadPricingOnce(): Promise<void> {
   const cached = await loadCachedPricing()
   if (cached) {
-    pricingCache = cached
+    setPricingCache(cached)
     return
   }
 
   try {
-    pricingCache = await fetchAndCachePricing()
+    setPricingCache(await fetchAndCachePricing())
   } catch (err) {
     // The bundled snapshot is already loaded, so pricing still works -- but it is
     // frozen at publish time and will not know models released since. Record why we
@@ -217,6 +240,7 @@ let userAliases: Record<string, string> = {}
 // User aliases take precedence over built-ins.
 export function setModelAliases(aliases: Record<string, string>): void {
   userAliases = aliases
+  modelCostsMemo.clear()
 }
 
 function resolveAlias(model: string): string {
@@ -232,6 +256,14 @@ function getCanonicalName(model: string): string {
 }
 
 export function getModelCosts(model: string): ModelCosts | null {
+  const memoised = modelCostsMemo.get(model)
+  if (memoised !== undefined) return memoised
+  const costs = resolveModelCosts(model)
+  modelCostsMemo.set(model, costs)
+  return costs
+}
+
+function resolveModelCosts(model: string): ModelCosts | null {
   // Try with provider prefix preserved (azure/gpt-5.4, openrouter/anthropic/claude-opus-4.6)
   const withPrefix = model.replace(/@.*$/, '').replace(/-\d{8}$/, '')
   if (pricingCache.has(withPrefix)) return pricingCache.get(withPrefix)!
@@ -326,7 +358,6 @@ export function getShortModelName(model: string): string {
     'gpt-4.1-nano': 'GPT-4.1 Nano',
     'gpt-4.1-mini': 'GPT-4.1 Mini',
     'gpt-4.1': 'GPT-4.1',
-    'codex-auto-review': 'Codex Auto Review',
     'gpt-5.5-pro': 'GPT-5.5 Pro',
     'gpt-5.5': 'GPT-5.5',
     'gpt-5.4-pro': 'GPT-5.4 Pro',

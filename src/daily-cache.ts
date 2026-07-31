@@ -5,8 +5,13 @@ import { homedir } from 'os'
 import { join } from 'path'
 import type { DateRange, ProjectSummary } from './types.js'
 
-export const DAILY_CACHE_VERSION = 4
-const MIN_SUPPORTED_VERSION = 2
+// A cached day stores an already-aggregated cost, and `ensureCacheHydrated` only computes
+// days after `lastComputedDate` -- so a pricing correction reaches history only if the old
+// days are discarded. Migration keeps them, which would leave the menubar reporting the
+// pre-fix codex totals indefinitely; raising MIN_SUPPORTED_VERSION alongside the version
+// is what forces the recompute, since isMigratableCache accepts the whole range between.
+export const DAILY_CACHE_VERSION = 5
+const MIN_SUPPORTED_VERSION = 5
 const DAILY_CACHE_FILENAME = 'daily-cache.json'
 
 export type DailyEntry = {

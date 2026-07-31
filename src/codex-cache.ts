@@ -6,7 +6,13 @@ import { homedir } from 'os'
 
 import type { ParsedProviderCall } from './providers/types.js'
 
-const CODEX_CACHE_VERSION = 1
+// Bump whenever a cached entry's meaning changes. Entries persist the cost that
+// `calculateCost` produced at parse time, so a pricing correction that is not paired with
+// a bump never reaches an install with a warm cache: session files keep their mtime
+// forever, so the stale entry is served verbatim and the fix reads as inert. v2 discards
+// everything priced before the codex alias and longest-prefix fixes, which also re-derives
+// the `cwd` those entries never carried.
+export const CODEX_CACHE_VERSION = 2
 const CACHE_FILE = 'codex-results.json'
 
 type FileFingerprint = { mtimeMs: number; sizeBytes: number }
@@ -15,8 +21,8 @@ type FileEntry = {
   mtimeMs: number
   sizeBytes: number
   project: string
-  /// Real cwd from the session's session_meta. Optional because entries cached before
-  /// this field existed do not carry it; those fall back to the project key.
+  /// Real cwd from the session's session_meta. Optional because a session file need not
+  /// record one; consumers fall back to the project key rather than inventing a path.
   cwd?: string
   calls: ParsedProviderCall[]
 }
