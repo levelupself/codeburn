@@ -671,10 +671,10 @@ export async function parseAllSessions(dateRange?: DateRange, providerFilter?: s
   const claudeDirs = claudeSources.map(s => ({ path: s.path, name: s.project }))
   const claudeProjects = await scanProjectDirs(claudeDirs, seenMsgIds, dateRange)
 
-  const providerGroups = new Map<string, Array<{ path: string; project: string }>>()
+  const providerGroups = new Map<string, Array<{ path: string; project: string; cwd?: string }>>()
   for (const source of nonClaudeSources) {
     const existing = providerGroups.get(source.provider) ?? []
-    existing.push({ path: source.path, project: source.project })
+    existing.push({ path: source.path, project: source.project, ...(source.cwd ? { cwd: source.cwd } : {}) })
     providerGroups.set(source.provider, existing)
   }
 
