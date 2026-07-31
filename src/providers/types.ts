@@ -2,6 +2,11 @@ export type SessionSource = {
   path: string
   project: string
   provider: string
+  /// Real working directory this session ran in, when the provider records one.
+  /// `project` is a display key that may be sanitized or lossy; this is the actual
+  /// path, so it -- and never a decoded `project` -- is what `ProjectSummary.projectPath`
+  /// should carry.
+  cwd?: string
 }
 
 export type SessionParser = {

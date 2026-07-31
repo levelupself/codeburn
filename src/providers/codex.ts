@@ -158,9 +158,11 @@ async function discoverSessionsInDir(codexDir: string): Promise<SessionSource[]>
           const s = await stat(filePath).catch(() => null)
           if (!s?.isFile()) continue
 
-          const cachedProject = await getCachedCodexProject(filePath)
-          if (cachedProject) {
-            sources.push({ path: filePath, project: cachedProject, provider: 'codex' })
+          const cached = await getCachedCodexProject(filePath)
+          if (cached) {
+            // cwd is absent on entries written before it was cached; the consumer falls
+            // back to the project key rather than inventing a path.
+            sources.push({ path: filePath, project: cached.project, provider: 'codex', ...(cached.cwd ? { cwd: cached.cwd } : {}) })
             continue
           }
 
@@ -168,7 +170,7 @@ async function discoverSessionsInDir(codexDir: string): Promise<SessionSource[]>
           if (!valid || !meta) continue
 
           const cwd = meta.payload?.cwd ?? 'unknown'
-          sources.push({ path: filePath, project: sanitizeProject(cwd), provider: 'codex' })
+          sources.push({ path: filePath, project: sanitizeProject(cwd), provider: 'codex', cwd })
         }
       }
     }
@@ -402,7 +404,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
       // result set against a fingerprint that would otherwise be re-parsed.
       if (!sawAnyLine) return
 
-      await writeCachedCodexResults(source.path, source.project, results, fp)
+      await writeCachedCodexResults(source.path, source.project, results, fp, source.cwd)
 
       for (const call of results) {
         yield call

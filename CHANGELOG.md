@@ -15,6 +15,39 @@
 - **Session cost outlier detector.** New `optimize` finding flags sessions costing more than 2x their peer-session average within the same project. Ignores sub-$1 outliers to avoid noise. Requires at least 3 sessions per project for a baseline.
 
 ### Fixed (CLI)
+- **Unrecognised models no longer silently cost $0.** `calculateCost` returns 0 when it
+  cannot find a price, which reads exactly like "this really was free". The bundled
+  price snapshot had also gone stale and shipped without the Claude 5 family, so a run
+  with the LiteLLM fetch blocked (offline, proxied, or `raw.githubusercontent.com`
+  unreachable) reported **$0.00 across 546 real calls with no warning at all** — not even
+  under `--verbose`. Three changes: the bundled snapshot is refreshed so Claude 5 and
+  GPT-5.6 price correctly with no network at all; every unpriced model is now recorded
+  and reported to stderr after any command; and a failed price refresh says so instead of
+  being swallowed by a bare `catch {}`. Warnings go to stderr, so `--format json` stdout
+  stays machine-readable.
+- **Codex `codex-auto-review` turns were free.** Codex writes its own turn labels into
+  `turn_context.model` rather than a model id, so LiteLLM has no entry and those turns
+  cost $0. On one real history that hid 81 calls carrying 753K input and 3.1M cache-read
+  tokens — about 6.7% of the all-time total, invisible. `codex-auto-review` and bare
+  `codex` now resolve to a price while keeping their own line in the model breakdown, so
+  the spend is both counted and still attributable. Both are approximations and can be
+  redirected with `codeburn model-alias`.
+- **Model price lookup is deterministic.** The prefix fallback returned the first key in
+  Map order that prefixed the model name, so pricing depended on LiteLLM's arbitrary key
+  ordering: `gpt-5.6-codex` matched `gpt-5` (index 334) before `gpt-5.6` (index 394) and
+  was billed at a quarter of the real input rate, while `gpt-5.5-codex` resolved
+  correctly only by luck of ordering. Longest prefix now wins, which is total and
+  order-independent.
+- **Project paths are read, not reconstructed.** `projectPath` was built by
+  `dirName.replace(/-/g, '/')`, attempting to invert Claude Code's project-directory
+  encoding. That encoding maps every non-alphanumeric character to `-`, so `/` `.` and
+  `-` collapse together and no inverse exists: a real worktree came back as
+  `/home/u//treehouse/proj/ab12/1/proj`, a path not on disk. Because `yield` tests
+  `isGitRepo(projectPath)`, it silently fell back to the process cwd for every project
+  and reported all sessions "abandoned". The true path is recorded in the transcript
+  (Claude's per-entry `cwd`, Codex's `session_meta.cwd`) and is now carried through
+  instead. Where no path was recorded, the project key is returned unchanged rather than
+  a fabricated path.
 - **`all` period semantics unified between CLI and dashboard.** The dashboard treated `--period all` as all-time (epoch start) while the CLI bounded it to the last 6 months. Both now consistently mean "Last 6 months". Period helpers (`Period`, `PERIODS`, `PERIOD_LABELS`, `toPeriod`, `getDateRange`) consolidated into `cli-date.ts`. Use `--from` / `--to` for unbounded historical ranges.
 
 ### Fixed (macOS menubar)

@@ -22,8 +22,24 @@ import type {
 import { classifyTurn, BASH_TOOLS } from './classifier.js'
 import { extractBashCommands } from './bash-utils.js'
 
-function unsanitizePath(dirName: string): string {
-  return dirName.replace(/-/g, '/')
+/// Best available filesystem path for a project.
+///
+/// This used to be `dirName.replace(/-/g, '/')`, an attempt to invert Claude Code's
+/// project-directory encoding. That encoding replaces every non-alphanumeric character
+/// with `-`, so `/` `.` and `-` all collapse to the same byte and the inverse does not
+/// exist: `/home/u/.treehouse/proj-ab12/1/proj` came back as
+/// `/home/u//treehouse/proj/ab12/1/proj`, a path that is not on disk. Beyond the wrong
+/// display, `yield` tests `isGitRepo(projectPath)` and silently fell back to the process
+/// cwd for every project, reporting all sessions as "abandoned".
+///
+/// So: use the real cwd the session recorded, and when there is none, return the project
+/// key unchanged rather than fabricating a path that looks real and is not.
+function resolveProjectPath(dirName: string, sessions: SessionSummary[], providerCwd?: string): string {
+  if (providerCwd) return providerCwd
+  for (const session of sessions) {
+    if (session.launchCwd) return session.launchCwd
+  }
+  return dirName
 }
 
 function parseJsonlLine(line: string): JournalEntry | null {
@@ -251,6 +267,7 @@ function buildSessionSummary(
   project: string,
   turns: ClassifiedTurn[],
   mcpInventory?: string[],
+  launchCwd?: string,
 ): SessionSummary {
   const modelBreakdown: SessionSummary['modelBreakdown'] = Object.create(null)
   const toolBreakdown: SessionSummary['toolBreakdown'] = Object.create(null)
@@ -340,6 +357,7 @@ function buildSessionSummary(
   return {
     sessionId,
     project,
+    ...(launchCwd ? { launchCwd } : {}),
     firstTimestamp: firstTs || turns[0]?.timestamp || '',
     lastTimestamp: lastTs || turns[turns.length - 1]?.timestamp || '',
     totalCostUSD: totalCost,
@@ -414,7 +432,11 @@ async function parseSessionFile(
   // turns inside a narrow date window.
   const mcpInventory = extractMcpInventory(entries)
 
-  return buildSessionSummary(sessionId, project, classified, mcpInventory)
+  // The launch cwd is the first entry that carries one. Later entries drift as the
+  // agent cd's into subdirectories, so only the first is the project root.
+  const launchCwd = entries.find(e => typeof e.cwd === 'string' && e.cwd)?.cwd
+
+  return buildSessionSummary(sessionId, project, classified, mcpInventory, launchCwd)
 }
 
 async function collectJsonlFiles(dirPath: string): Promise<string[]> {
@@ -453,7 +475,7 @@ async function scanProjectDirs(dirs: Array<{ path: string; name: string }>, seen
   for (const [dirName, sessions] of projectMap) {
     projects.push({
       project: dirName,
-      projectPath: unsanitizePath(dirName),
+      projectPath: resolveProjectPath(dirName, sessions),
       sessions,
       totalCostUSD: sessions.reduce((s, sess) => s + sess.totalCostUSD, 0),
       totalApiCalls: sessions.reduce((s, sess) => s + sess.apiCalls, 0),
@@ -501,7 +523,7 @@ function providerCallToTurn(call: ParsedProviderCall): ParsedTurn {
 
 async function parseProviderSources(
   providerName: string,
-  sources: Array<{ path: string; project: string }>,
+  sources: Array<{ path: string; project: string; cwd?: string }>,
   seenKeys: Set<string>,
   dateRange?: DateRange,
 ): Promise<ProjectSummary[]> {
@@ -509,6 +531,13 @@ async function parseProviderSources(
   if (!provider) return []
 
   const sessionMap = new Map<string, { project: string; turns: ClassifiedTurn[] }>()
+  // Providers that record where a session actually ran (codex reads it from
+  // session_meta) hand us the real path; `project` is only a display key and for some
+  // providers is a sanitized or invented name, so it must never be decoded into a path.
+  const projectCwds = new Map<string, string>()
+  for (const source of sources) {
+    if (source.cwd && !projectCwds.has(source.project)) projectCwds.set(source.project, source.cwd)
+  }
 
   try {
     for (const source of sources) {
@@ -519,7 +548,7 @@ async function parseProviderSources(
         } catch { /* fall through; treat unknown stat as "may contain data" */ }
       }
       const parser = provider.createSessionParser(
-        { path: source.path, project: source.project, provider: providerName },
+        { path: source.path, project: source.project, provider: providerName, ...(source.cwd ? { cwd: source.cwd } : {}) },
         seenKeys,
       )
 
@@ -565,7 +594,7 @@ async function parseProviderSources(
   for (const [dirName, sessions] of projectMap) {
     projects.push({
       project: dirName,
-      projectPath: unsanitizePath(dirName),
+      projectPath: resolveProjectPath(dirName, sessions, projectCwds.get(dirName)),
       sessions,
       totalCostUSD: sessions.reduce((s, sess) => s + sess.totalCostUSD, 0),
       totalApiCalls: sessions.reduce((s, sess) => s + sess.apiCalls, 0),
@@ -582,6 +611,12 @@ const sessionCache = new Map<string, { data: ProjectSummary[]; ts: number }>()
 function cacheKey(dateRange?: DateRange, providerFilter?: string): string {
   const s = dateRange ? `${dateRange.start.getTime()}:${dateRange.end.getTime()}` : 'none'
   return `${s}:${providerFilter ?? 'all'}`
+}
+
+/// Test seam: the cache is keyed on date range and provider only, so a test that swaps
+/// CLAUDE_CONFIG_DIR between cases would otherwise be served the previous case's result.
+export function clearSessionCache(): void {
+  sessionCache.clear()
 }
 
 function cachePut(key: string, data: ProjectSummary[]) {

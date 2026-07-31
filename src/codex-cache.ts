@@ -15,6 +15,9 @@ type FileEntry = {
   mtimeMs: number
   sizeBytes: number
   project: string
+  /// Real cwd from the session's session_meta. Optional because entries cached before
+  /// this field existed do not carry it; those fall back to the project key.
+  cwd?: string
   calls: ParsedProviderCall[]
 }
 
@@ -70,12 +73,13 @@ export async function readCachedCodexResults(
 
 export async function getCachedCodexProject(
   filePath: string,
-): Promise<string | null> {
+): Promise<{ project: string; cwd?: string } | null> {
   try {
     const s = await stat(filePath)
     const cache = await loadCache()
     const entry = getEntry(cache, filePath, { mtimeMs: s.mtimeMs, sizeBytes: s.size })
-    return entry?.project ?? null
+    if (!entry) return null
+    return { project: entry.project, ...(entry.cwd ? { cwd: entry.cwd } : {}) }
   } catch {}
   return null
 }
@@ -96,6 +100,7 @@ export async function writeCachedCodexResults(
   project: string,
   calls: ParsedProviderCall[],
   fingerprint: FileFingerprint,
+  cwd?: string,
 ): Promise<void> {
   try {
     const cache = await loadCache()
@@ -103,6 +108,7 @@ export async function writeCachedCodexResults(
       mtimeMs: fingerprint.mtimeMs,
       sizeBytes: fingerprint.sizeBytes,
       project,
+      ...(cwd ? { cwd } : {}),
       calls,
     }
   } catch {}
