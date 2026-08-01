@@ -106,6 +106,12 @@ export type ClassifiedTurn = ParsedTurn & {
 export type SessionSummary = {
   sessionId: string
   project: string
+  /// Absolute working directory the session was launched from, read straight out of the
+  /// transcript. Claude Code's project-directory name is a lossy encoding of this path
+  /// (every non-alphanumeric character becomes `-`), so it cannot be decoded back --
+  /// this is the only trustworthy source for the real path. Absent when the transcript
+  /// records no cwd.
+  launchCwd?: string
   firstTimestamp: string
   lastTimestamp: string
   totalCostUSD: number

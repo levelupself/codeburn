@@ -49,6 +49,49 @@ function loadSnapshot(): Map<string, ModelCosts> {
 
 let pricingCache: Map<string, ModelCosts> = loadSnapshot()
 
+/// Resolved lookups, keyed by the raw model string. A prefix lookup has to scan the whole
+/// price table (longest-prefix-wins is deliberately exhaustive, see `resolveModelCosts`),
+/// and every API call of every session parse pays it. Misses are cached too: an unpriced
+/// model scans the full table before `recordUnpriced` and is the hottest miss there is.
+/// Only valid while both inputs to the resolution are unchanged, so it is cleared whenever
+/// the price table or the alias table is replaced.
+const modelCostsMemo = new Map<string, ModelCosts | null>()
+
+function setPricingCache(pricing: Map<string, ModelCosts>): void {
+  pricingCache = pricing
+  modelCostsMemo.clear()
+}
+
+let pricingIsStale = false
+let pricingStaleReason = ''
+
+/// Models we were asked to cost but could not find a price for. A missing price makes
+/// `calculateCost` return 0, which is indistinguishable from "this really was free" --
+/// so every such model is recorded here and the CLI reports it. Never let an unpriced
+/// model quietly read as $0.00.
+///
+/// Names only, deliberately. A single command parses the same sessions more than once
+/// (`status` covers today and the month; the daily cache hydrates separately), so
+/// counting invocations here would report several times the real call count. The
+/// per-model breakdown already shows accurate calls against a $0.00 cost; this set's job
+/// is to make sure the zero gets noticed at all.
+const unpricedModels = new Set<string>()
+
+function recordUnpriced(model: string): void {
+  unpricedModels.add(model)
+}
+
+/// Models that could not be priced, alphabetically. Empty when everything was priced.
+export function getUnpricedModels(): string[] {
+  return [...unpricedModels].sort((a, b) => a.localeCompare(b))
+}
+
+/// Test seam: parsing is process-global, so tests that assert on unpriced models
+/// need to start from a known state.
+export function resetUnpricedModels(): void {
+  unpricedModels.clear()
+}
+
 function getCacheDir(): string {
   return join(homedir(), '.cache', 'codeburn')
 }
@@ -106,18 +149,42 @@ async function loadCachedPricing(): Promise<Map<string, ModelCosts> | null> {
   }
 }
 
-export async function loadPricing(): Promise<void> {
+let pricingLoad: Promise<void> | null = null
+
+/// Idempotent: the price table is process-global, so loading it more than once only
+/// repeats work. Commands can therefore call this wherever pricing is needed -- notably
+/// before anything that persists a computed cost -- without tracking who called it first.
+export function loadPricing(): Promise<void> {
+  pricingLoad ??= loadPricingOnce()
+  return pricingLoad
+}
+
+async function loadPricingOnce(): Promise<void> {
   const cached = await loadCachedPricing()
   if (cached) {
-    pricingCache = cached
+    setPricingCache(cached)
     return
   }
 
   try {
-    pricingCache = await fetchAndCachePricing()
-  } catch {
-    // snapshot already loaded at init; nothing more to do
+    setPricingCache(await fetchAndCachePricing())
+  } catch (err) {
+    // The bundled snapshot is already loaded, so pricing still works -- but it is
+    // frozen at publish time and will not know models released since. Record why we
+    // fell back so the CLI can say so instead of quietly reporting stale (or zero)
+    // costs. Silently swallowing this is how "$0.00 for 546 calls" used to happen.
+    pricingIsStale = true
+    pricingStaleReason = err instanceof Error ? err.message : String(err)
   }
+}
+
+/// True when the live LiteLLM fetch failed and we are serving the bundled snapshot.
+export function isPricingStale(): boolean {
+  return pricingIsStale
+}
+
+export function getPricingStaleReason(): string {
+  return pricingStaleReason
 }
 
 // Known model name variants that providers emit but LiteLLM/fallback don't index under.
@@ -148,6 +215,14 @@ const BUILTIN_ALIASES: Record<string, string> = {
   'gpt-4.1':                        'gpt-4.1',
   'gpt-5.2-low':                    'gpt-5',
   'gpt-5.1-codex-high':             'gpt-5.3-codex',
+  // Codex writes its own turn labels into turn_context.model rather than a real model
+  // id, so LiteLLM has no entry for them and the turns were costing $0 -- on real data
+  // that hid 81 calls carrying 753K input and 3.1M cache-read tokens. These are
+  // approximations: 'codex-auto-review' turns carry model_provider=openai and appear in
+  // sessions whose explicitly-named model is gpt-5.5, and bare 'codex' matches the
+  // codex provider's own unknown-model default. Override with `codeburn model-alias`.
+  'codex-auto-review':              'gpt-5.5',
+  'codex':                          'gpt-5',
   // Antigravity Gemini model IDs resolve to preview-priced entries.
   'gemini-3.1-pro':                 'gemini-3.1-pro-preview',
   'gemini-3-flash':                 'gemini-3-flash-preview',
@@ -165,6 +240,7 @@ let userAliases: Record<string, string> = {}
 // User aliases take precedence over built-ins.
 export function setModelAliases(aliases: Record<string, string>): void {
   userAliases = aliases
+  modelCostsMemo.clear()
 }
 
 function resolveAlias(model: string): string {
@@ -180,6 +256,14 @@ function getCanonicalName(model: string): string {
 }
 
 export function getModelCosts(model: string): ModelCosts | null {
+  const memoised = modelCostsMemo.get(model)
+  if (memoised !== undefined) return memoised
+  const costs = resolveModelCosts(model)
+  modelCostsMemo.set(model, costs)
+  return costs
+}
+
+function resolveModelCosts(model: string): ModelCosts | null {
   // Try with provider prefix preserved (azure/gpt-5.4, openrouter/anthropic/claude-opus-4.6)
   const withPrefix = model.replace(/@.*$/, '').replace(/-\d{8}$/, '')
   if (pricingCache.has(withPrefix)) return pricingCache.get(withPrefix)!
@@ -187,11 +271,23 @@ export function getModelCosts(model: string): ModelCosts | null {
   const canonical = resolveAlias(getCanonicalName(model))
   if (pricingCache.has(canonical)) return pricingCache.get(canonical)!
 
+  // Longest prefix wins. Iterating in Map order and returning the FIRST match made the
+  // price depend on LiteLLM's arbitrary key ordering: 'gpt-5.6-codex' matched 'gpt-5'
+  // (index 334) before 'gpt-5.6' (index 394) and was billed at a quarter of the real
+  // input rate, while 'gpt-5.5-codex' happened to resolve correctly because 'gpt-5.5'
+  // sorted earlier. Two distinct keys of equal length cannot both prefix one string, so
+  // longest-wins is total and order-independent.
+  let bestKey = ''
+  let bestCosts: ModelCosts | null = null
   for (const [key, costs] of pricingCache) {
-    if (canonical.startsWith(key + '-') || canonical.startsWith(key)) return costs
+    if (key.length <= bestKey.length) continue
+    if (canonical.startsWith(key + '-') || canonical.startsWith(key)) {
+      bestKey = key
+      bestCosts = costs
+    }
   }
 
-  return null
+  return bestCosts
 }
 
 export function calculateCost(
@@ -204,7 +300,13 @@ export function calculateCost(
   speed: 'standard' | 'fast' = 'standard',
 ): number {
   const costs = getModelCosts(model)
-  if (!costs) return 0
+  if (!costs) {
+    // Zero-token calls (Claude Code's `<synthetic>` error placeholders, for instance)
+    // genuinely cost nothing; only flag a model when real usage went unpriced.
+    const tokens = inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
+    if (tokens > 0 || webSearchRequests > 0) recordUnpriced(model)
+    return 0
+  }
 
   const multiplier = speed === 'fast' ? costs.fastMultiplier : 1
 
@@ -227,6 +329,12 @@ const autoModelNames: Record<string, string> = {
   'cline-auto': 'Cline (auto)',
   'openclaw-auto': 'OpenClaw (auto)',
   'qwen-auto': 'Qwen (auto)',
+  // Checked before alias resolution, so these keep their own line in the breakdown
+  // instead of disappearing into the model they are priced against -- same trick the
+  // *-auto entries above use. Losing the distinction would trade one blind spot
+  // (unpriced) for another (unattributable).
+  'codex-auto-review': 'Codex Auto Review',
+  'codex': 'Codex',
 }
 
 export function getShortModelName(model: string): string {
@@ -250,7 +358,6 @@ export function getShortModelName(model: string): string {
     'gpt-4.1-nano': 'GPT-4.1 Nano',
     'gpt-4.1-mini': 'GPT-4.1 Mini',
     'gpt-4.1': 'GPT-4.1',
-    'codex-auto-review': 'Codex Auto Review',
     'gpt-5.5-pro': 'GPT-5.5 Pro',
     'gpt-5.5': 'GPT-5.5',
     'gpt-5.4-pro': 'GPT-5.4 Pro',

@@ -47,6 +47,13 @@ afterEach(async () => {
 })
 
 describe('loadDailyCache', () => {
+  it('is at a version past the one that stored pre-fix day costs', async () => {
+    // v4 days were aggregated before the codex pricing fixes. Reverting this bump would
+    // leave the menubar reporting those understated totals forever, with every other
+    // test still green, so pin it.
+    expect(DAILY_CACHE_VERSION).toBeGreaterThan(4)
+  })
+
   it('returns an empty cache when the file does not exist', async () => {
     const cache = await loadDailyCache()
     expect(cache.version).toBe(DAILY_CACHE_VERSION)
@@ -77,9 +84,32 @@ describe('loadDailyCache', () => {
     expect(existsSync(join(TMP_CACHE_ROOT, 'daily-cache.json.v1.bak'))).toBe(true)
   })
 
-  it('migrates an older supported version by filling missing fields', async () => {
+  // A cached day holds an already-aggregated cost, and hydration never recomputes a day
+  // it already has. Carrying days across a version bump would therefore serve costs
+  // computed under the old pricing forever, which is exactly how the pre-fix codex totals
+  // survived. Anything below the current version must be dropped, not migrated.
+  it('discards the previous version instead of migrating its costs forward', async () => {
     const saved = {
-      version: 2,
+      version: DAILY_CACHE_VERSION - 1,
+      lastComputedDate: '2026-04-10',
+      days: [{
+        date: '2026-04-10', cost: 10, calls: 5, sessions: 2,
+        inputTokens: 1000, outputTokens: 500, cacheReadTokens: 200, cacheWriteTokens: 100,
+        editTurns: 0, oneShotTurns: 0, models: {}, categories: {}, providers: {},
+      }],
+    }
+    const { writeFile, mkdir } = await import('fs/promises')
+    await mkdir(TMP_CACHE_ROOT, { recursive: true })
+    await writeFile(join(TMP_CACHE_ROOT, 'daily-cache.json'), JSON.stringify(saved), 'utf-8')
+    const cache = await loadDailyCache()
+    expect(cache.days).toEqual([])
+    expect(cache.lastComputedDate).toBeNull()
+    expect(existsSync(join(TMP_CACHE_ROOT, `daily-cache.json.v${DAILY_CACHE_VERSION - 1}.bak`))).toBe(true)
+  })
+
+  it('fills missing fields on a current-version cache written before they existed', async () => {
+    const saved = {
+      version: DAILY_CACHE_VERSION,
       lastComputedDate: '2026-04-10',
       days: [{
         date: '2026-04-10', cost: 10, calls: 5, sessions: 2,

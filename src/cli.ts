@@ -1,7 +1,7 @@
 import { Command } from 'commander'
 import { installMenubarApp } from './menubar-installer.js'
 import { exportCsv, exportJson, type PeriodExport } from './export.js'
-import { loadPricing, setModelAliases } from './models.js'
+import { loadPricing, setModelAliases, getUnpricedModels, isPricingStale, getPricingStaleReason } from './models.js'
 import { parseAllSessions, filterProjectsByName } from './parser.js'
 import { convertCost } from './currency.js'
 import { renderStatusBar } from './format.js'
@@ -25,6 +25,11 @@ const { version } = require('../package.json')
 import { loadCurrency, getCurrency, isValidCurrencyCode } from './currency.js'
 
 async function hydrateCache() {
+  // Hydration persists per-day costs, so it has to run against the live price table --
+  // otherwise a model LiteLLM knows about but the bundled snapshot does not gets frozen
+  // into the cache at $0 even though the fetch succeeded. Every hydrating command loads
+  // pricing here rather than each call site remembering to, so the ordering cannot drift.
+  await loadPricing()
   try {
     return await ensureCacheHydrated(
       (range) => parseAllSessions(range, 'all'),
@@ -86,6 +91,9 @@ async function runJsonReport(period: Period, provider: string, project: string[]
   console.log(JSON.stringify(report, null, 2))
 }
 
+/// How many unpriced models to name before collapsing the rest into a count.
+const UNPRICED_PREVIEW = 5
+
 const program = new Command()
   .name('codeburn')
   .description('See where your AI coding tokens go - by task, tool, model, and project')
@@ -110,6 +118,35 @@ program.hook('preAction', async (thisCommand) => {
     process.env['CODEBURN_VERBOSE'] = '1'
   }
   await loadCurrency()
+})
+
+/// An unpriced model costs $0, which reads exactly like "this was free". Report it after
+/// every command so a wrong zero can never pass for a real total. Goes to stderr so it
+/// cannot corrupt the JSON that `export --format json` and `report --format json` put on
+/// stdout, and fires post-action so it cannot scribble over the Ink dashboard.
+program.hook('postAction', () => {
+  const unpriced = getUnpricedModels()
+  if (unpriced.length === 0 && !isPricingStale()) return
+
+  const lines: string[] = []
+  if (unpriced.length > 0) {
+    lines.push(
+      `warning: ${unpriced.length} model${unpriced.length === 1 ? ' has' : 's have'} no known price; ` +
+      `their calls are counted as $0.00 and are MISSING from every total above:`,
+    )
+    for (const model of unpriced.slice(0, UNPRICED_PREVIEW)) lines.push(`  ${model}`)
+    if (unpriced.length > UNPRICED_PREVIEW) lines.push(`  +${unpriced.length - UNPRICED_PREVIEW} more`)
+    lines.push(`  Their call counts are shown against $0.00 in the per-model breakdown.`)
+    lines.push(`  Price one by mapping it to a known model: codeburn model-alias <from> <to>`)
+  }
+  if (isPricingStale()) {
+    lines.push(
+      `warning: could not refresh model prices (${getPricingStaleReason()}); ` +
+      `using the snapshot bundled at publish time, which will not know newer models.`,
+    )
+  }
+
+  process.stderr.write('\n' + lines.map(l => `codeburn: ${l}`).join('\n') + '\n\n')
 })
 
 function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: string) {
