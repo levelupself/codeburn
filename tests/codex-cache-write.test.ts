@@ -110,6 +110,21 @@ describe('Codex cache write failures', () => {
     expect(await readFile(finalPath, 'utf8')).toBe(previous)
   })
 
+  it('reclaims a dead writer immediately but leaves a live writer alone', async () => {
+    const dead = join(dir, 'codex-results.json.2222222222222222.2147483647.tmp')
+    const live = join(dir, `codex-results.json.3333333333333333.${process.pid}.tmp`)
+    await writeFile(dead, 'partial')
+    await writeFile(live, 'active')
+    const old = new Date(Date.now() - 48 * 60 * 60 * 1000)
+    await utimes(live, old, old)
+    vi.resetModules()
+    mod = await import('../src/codex-cache.js')
+    await mod.readCachedCodexResults(session)
+    expect(await readdir(dir)).not.toContain(dead.split('/').at(-1))
+    expect(await readFile(live, 'utf8')).toBe('active')
+    expect(warning.mock.calls.flat().join(' ')).toContain('unfinished')
+  })
+
   it('does not serve the old entry when a session changes after a failed flush', async () => {
     faults.stage = 'write'
     faults.bytes = 64
