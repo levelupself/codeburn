@@ -1,4 +1,4 @@
-import { readFile, mkdir, stat, open, rename, unlink } from 'fs/promises'
+import { readFile, readdir, mkdir, stat, open, rename, unlink } from 'fs/promises'
 import { existsSync } from 'fs'
 import { randomBytes } from 'crypto'
 import { join } from 'path'
@@ -40,10 +40,53 @@ function getCachePath(): string {
   return join(getCacheDir(), CACHE_FILE)
 }
 
+// Legacy temporary files have no owner information. Give recent writes a full day
+// before reclaiming them; new temporary files also identify their live writer.
+const ORPHAN_AGE_MS = 24 * 60 * 60 * 1000
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+async function cleanOrphanedTemps(): Promise<void> {
+  const dir = getCacheDir()
+  try {
+    const names = await readdir(dir)
+    for (const name of names) {
+      const match = /^codex-results\.json\.[a-f0-9]{16}(?:\.(\d+))?\.tmp$/.exec(name)
+      if (!match) continue
+      if (match[1]) {
+        try {
+          process.kill(Number(match[1]), 0)
+          continue // Never unlink a live writer's file, even if it is old.
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue
+        }
+      }
+      const path = join(dir, name)
+      try {
+        const info = await stat(path)
+        if (!info.isFile()) continue
+        console.warn(`[codeburn] Found unfinished Codex cache write: ${path} (${info.size} bytes). The disk cache may be stale; source fingerprints will be checked.`)
+        if (match[1] || Date.now() - info.mtimeMs >= ORPHAN_AGE_MS) await unlink(path)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          console.warn(`[codeburn] Could not clean Codex cache temporary file ${path}: ${errorMessage(error)}`)
+        }
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.warn(`[codeburn] Could not inspect unfinished Codex cache writes in ${dir}: ${errorMessage(error)}`)
+    }
+  }
+}
+
 let memCache: ResultCache | null = null
 
 async function loadCache(): Promise<ResultCache> {
   if (memCache) return memCache
+  await cleanOrphanedTemps()
   try {
     const raw = await readFile(getCachePath(), 'utf-8')
     const cache = JSON.parse(raw) as ResultCache
@@ -122,7 +165,10 @@ export async function writeCachedCodexResults(
 
 export async function flushCodexCache(): Promise<void> {
   if (!memCache) return
+  let tempPath: string | undefined
+  let ownsTemp = false
   try {
+    await cleanOrphanedTemps()
     // Evict entries for files that no longer exist on disk
     const paths = Object.keys(memCache.files)
     for (const p of paths) {
@@ -136,20 +182,29 @@ export async function flushCodexCache(): Promise<void> {
     const dir = getCacheDir()
     if (!existsSync(dir)) await mkdir(dir, { recursive: true })
     const finalPath = getCachePath()
-    const tempPath = `${finalPath}.${randomBytes(8).toString('hex')}.tmp`
+    tempPath = `${finalPath}.${randomBytes(8).toString('hex')}.${process.pid}.tmp`
     const payload = JSON.stringify(memCache)
-    const handle = await open(tempPath, 'w', 0o600)
+    const handle = await open(tempPath, 'wx', 0o600)
+    ownsTemp = true
     try {
       await handle.writeFile(payload, { encoding: 'utf-8' })
       await handle.sync()
     } finally {
       await handle.close()
     }
-    try {
-      await rename(tempPath, finalPath)
-    } catch (err) {
-      try { await unlink(tempPath) } catch {}
-      throw err
+    await rename(tempPath, finalPath)
+  } catch (error) {
+    // Cache persistence is optional, but failure is not silent. Reports can still
+    // use parsed results; the last complete disk snapshot must remain intact.
+    console.warn(`[codeburn] Failed to update Codex cache ${getCachePath()}; the disk cache may be stale: ${errorMessage(error)}`)
+  } finally {
+    // Cover write, fsync, close, and rename failures, not just rename failures.
+    if (ownsTemp && tempPath) {
+      try { await unlink(tempPath) } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          console.warn(`[codeburn] Could not remove Codex cache temporary file ${tempPath}: ${errorMessage(error)}`)
+        }
+      }
     }
-  } catch {}
+  }
 }
