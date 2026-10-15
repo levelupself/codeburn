@@ -5,12 +5,8 @@ import { tmpdir } from 'os'
 
 import type { ParsedProviderCall } from '../src/providers/types.js'
 
-// The codex results cache persists each call's already-computed costUSD, keyed only on
-// the session file's mtime and size. Historical session files never change, so a pricing
-// correction that is not paired with a CODEX_CACHE_VERSION bump never reaches an install
-// with a warm cache: the cached branch in the parser returns before calculateCost runs,
-// and the user keeps seeing the same silent $0 with no sign the fix did not apply. These
-// tests pin the invalidation mechanism the bump relies on.
+// Schema versions invalidate parsed tokens/metadata. Persisted costUSD is a snapshot;
+// provider-level repricing is exercised by cli-codex-repricing.test.ts.
 
 let cacheDir: string
 let sessionFile: string

@@ -195,7 +195,16 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
         for (const call of cached) {
           if (seenKeys.has(call.deduplicationKey)) continue
           seenKeys.add(call.deduplicationKey)
-          yield call
+          // Reuse normalized token data, never the persisted derived price. Keep
+          // the cold path's charging semantics, including reasoning as output.
+          yield {
+            ...call,
+            costUSD: calculateCost(
+              call.model, call.inputTokens, call.outputTokens + call.reasoningTokens,
+              call.cacheCreationInputTokens, call.cacheReadInputTokens,
+              call.webSearchRequests, call.speed,
+            ),
+          }
         }
         return
       }

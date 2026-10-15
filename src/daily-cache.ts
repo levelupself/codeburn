@@ -3,13 +3,12 @@ import { existsSync } from 'fs'
 import { mkdir, open, readFile, rename, unlink } from 'fs/promises'
 import { homedir } from 'os'
 import { join } from 'path'
+import { getPricingContext, getUnpricedModels, restoreUnpricedModels } from './models.js'
 import type { DateRange, ProjectSummary } from './types.js'
 
-// A cached day stores an already-aggregated cost, and `ensureCacheHydrated` only computes
-// days after `lastComputedDate` -- so a pricing correction reaches history only if the old
-// days are discarded. Migration keeps them, which would leave the menubar reporting the
-// pre-fix codex totals indefinitely; raising MIN_SUPPORTED_VERSION alongside the version
-// is what forces the recompute, since isMigratableCache accepts the whole range between.
+// Schema/charging-semantics changes still require a version floor bump. Rate and
+// alias changes are handled separately by pricingContext during hydration; legacy
+// aggregates without that context are also rebuilt. See docs/cache-pricing.md.
 export const DAILY_CACHE_VERSION = 5
 const MIN_SUPPORTED_VERSION = 5
 const DAILY_CACHE_FILENAME = 'daily-cache.json'
@@ -41,6 +40,9 @@ export type DailyCache = {
   version: number
   lastComputedDate: string | null
   days: DailyEntry[]
+  // Absent on legacy caches: hydration must discard those derived values.
+  pricingContext?: string
+  unpricedModels?: string[]
 }
 
 function getCacheDir(): string {
@@ -55,7 +57,7 @@ export function emptyCache(): DailyCache {
   return { version: DAILY_CACHE_VERSION, lastComputedDate: null, days: [] }
 }
 
-function isMigratableCache(parsed: unknown): parsed is { version: number; lastComputedDate: string | null; days: Record<string, unknown>[] } {
+function isMigratableCache(parsed: unknown): parsed is { version: number; lastComputedDate: string | null; days: Record<string, unknown>[]; pricingContext?: string; unpricedModels?: string[] } {
   if (!parsed || typeof parsed !== 'object') return false
   const c = parsed as Partial<DailyCache>
   if (typeof c.version !== 'number') return false
@@ -97,6 +99,8 @@ export async function loadDailyCache(): Promise<DailyCache> {
         version: DAILY_CACHE_VERSION,
         lastComputedDate: parsed.lastComputedDate,
         days: migrateDays(parsed.days),
+        ...(parsed.pricingContext !== undefined ? { pricingContext: parsed.pricingContext } : {}),
+        ...(parsed.unpricedModels !== undefined ? { unpricedModels: parsed.unpricedModels } : {}),
       }
       if (parsed.version < DAILY_CACHE_VERSION) {
         await saveDailyCache(migrated).catch(() => {})
@@ -141,7 +145,7 @@ export function addNewDays(cache: DailyCache, incoming: DailyEntry[], newestDate
   const nextLast = cache.lastComputedDate && cache.lastComputedDate > newestDate
     ? cache.lastComputedDate
     : newestDate
-  return { version: DAILY_CACHE_VERSION, lastComputedDate: nextLast, days: merged }
+  return { ...cache, version: DAILY_CACHE_VERSION, lastComputedDate: nextLast, days: merged }
 }
 
 export function getDaysInRange(cache: DailyCache, start: string, end: string): DailyEntry[] {
@@ -174,6 +178,12 @@ export async function ensureCacheHydrated(
 
   return withDailyCacheLock(async () => {
     let c = await loadDailyCache()
+    const pricingContext = getPricingContext()
+    // Historical days cannot be repriced from aggregates: they lost reasoning,
+    // web-search and speed buckets. Rebuild the full backfill from provider calls.
+    // Callers must load pricing and aliases before hydration (CLI hydrateCache does).
+    if (c.pricingContext !== pricingContext) c = { ...emptyCache(), pricingContext }
+    restoreUnpricedModels(c.unpricedModels ?? [])
 
     const hadYesterday = c.days.some(d => d.date >= yesterdayStr)
     if (hadYesterday) {
@@ -195,6 +205,7 @@ export async function ensureCacheHydrated(
       const gapProjects = await parseSessions(gapRange)
       const gapDays = aggregateDays(gapProjects)
       c = addNewDays(c, gapDays, yesterdayStr)
+      c.unpricedModels = getUnpricedModels()
       await saveDailyCache(c)
     }
     return c

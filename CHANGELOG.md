@@ -48,16 +48,8 @@
   (Claude's per-entry `cwd`, Codex's `session_meta.cwd`) and is now carried through
   instead. Where no path was recorded, the project key is returned unchanged rather than
   a fabricated path.
-- **Caches holding pre-fix costs are discarded on upgrade.** Both the Codex results cache
-  and the daily aggregate cache persist an already-computed cost, and neither recomputes
-  an entry it already has — Codex session files never change mtime, and hydration only
-  fills days after the last computed one. Left alone, every pricing fix above would have
-  been inert on any existing install: the same silent $0 for cached Codex turns, and a
-  menubar that kept reporting the understated totals indefinitely. Both cache versions are
-  bumped so pre-fix entries are dropped rather than carried forward. The first run after
-  upgrading re-parses history and is slower; every run after it is normal. Hydration also
-  loads pricing before it aggregates, so a model that LiteLLM knows about but the bundled
-  snapshot does not can no longer be frozen into a cached day at $0.
+- **Cache pricing refresh.** See the [pricing and cache contract](docs/cache-pricing.md)
+  for Codex repricing, historical daily refresh, and the remaining Cursor limitation.
 - **Price lookups are memoised.** Longest-prefix resolution scans the whole price table,
   which is paid per API call and per parse pass. Lookups (misses included) are now cached
   per model name and invalidated whenever the price table or `codeburn model-alias`

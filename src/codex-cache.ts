@@ -6,12 +6,9 @@ import { homedir } from 'os'
 
 import type { ParsedProviderCall } from './providers/types.js'
 
-// Bump whenever a cached entry's meaning changes. Entries persist the cost that
-// `calculateCost` produced at parse time, so a pricing correction that is not paired with
-// a bump never reaches an install with a warm cache: session files keep their mtime
-// forever, so the stale entry is served verbatim and the fix reads as inert. v2 discards
-// everything priced before the codex alias and longest-prefix fixes, which also re-derives
-// the `cwd` those entries never carried.
+// Bump when parsed token or metadata semantics change. Stored costUSD is only a
+// snapshot: the Codex provider reprices cached calls using the current rates/aliases.
+// v2 discarded tokens/metadata parsed before the codex alias and cwd fixes.
 export const CODEX_CACHE_VERSION = 2
 const CACHE_FILE = 'codex-results.json'
 
