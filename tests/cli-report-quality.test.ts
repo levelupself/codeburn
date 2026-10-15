@@ -60,6 +60,36 @@ describe('report data quality', () => {
     expect(Object.keys(stored.files)).toHaveLength(2)
   })
 
+  it('preserves call markers and per-session counts through the parser on warm caches', () => {
+    for (let pass = 0; pass < 2; pass++) {
+      const result = spawnSync(process.execPath, [...baseArgs.slice(0, -1), '--input-type=module', '--eval', `
+        const { parseAllSessions } = await import('./src/parser.ts');
+        console.log(JSON.stringify(await parseAllSessions(undefined, 'codex')));
+      `], { env: env(), encoding: 'utf8', timeout: 30_000 })
+      expect(result.status, result.stderr).toBe(0)
+      const sessions = JSON.parse(result.stdout).flatMap((p: { sessions: unknown[] }) => p.sessions)
+      const observed = sessions.find((s: { sessionId: string }) => s.sessionId === 'observed')
+      const estimated = sessions.find((s: { sessionId: string }) => s.sessionId === 'estimated')
+      expect(observed.turns[0].assistantCalls[0].costIsEstimated).toBe(false)
+      expect(estimated.turns[0].assistantCalls[0].costIsEstimated).toBe(true)
+      expect(observed.dataQuality).toMatchObject({ observedCalls: 1, estimatedCalls: 0 })
+      expect(estimated.dataQuality).toMatchObject({ observedCalls: 0, estimatedCalls: 1 })
+    }
+  })
+
+  it('keeps unaudited usage provenance unknown rather than observed', async () => {
+    const dir = join(home, '.claude/projects/legacy')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'legacy.jsonl'), JSON.stringify({
+      type: 'assistant', sessionId: 'legacy', cwd: '/synthetic/legacy', timestamp,
+      message: { id: 'legacy', model: 'claude-sonnet-4-5', role: 'assistant', content: [],
+        usage: { input_tokens: 1000, output_tokens: 100 } },
+    }) + '\n')
+    const { data } = report(['--provider', 'claude'])
+    expect(data.overview.calls).toBe(1)
+    expect(data.dataQuality).toMatchObject({ observedCalls: 0, estimatedCalls: 0, unknownProvenanceCalls: 1, costComplete: true })
+  })
+
   it('counts only selected calls even when hydration parsed an unpriced project', async () => {
     await session('unpriced', false, unknown)
     report() // Hydrate and warm every project before selecting one.
