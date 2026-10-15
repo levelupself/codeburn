@@ -171,17 +171,11 @@ For categories that involve code edits, CodeBurn detects edit/test/fix retry cyc
 ### Report data quality
 
 The dashboard shows estimated usage and missing prices while it is open, including
-when it falls back to bundled snapshot prices. `report --format json` adds
-`dataQuality` counts and `pricing` metadata. `overview.completeCost` is null when
-some selected calls have missing or unaudited pricing; the existing `cost` field
-remains a numeric, potentially partial total for compatibility.
-
-Usage provenance currently distinguishes Codex token-count events from its
-character-based estimates. Other providers have unknown provenance, not observed
-usage. Pricing completeness is currently audited for Claude and Codex; other
-providers retain unknown pricing coverage. These are API-equivalent estimates,
-not billed spend. See [the quality contract](docs/cache-pricing.md#report-quality-and-provider-coverage)
-for field meanings and cache/provider limits.
+when it falls back to bundled snapshot prices. `report --format json` exposes
+quality counts and pricing metadata for automated consumers. Coverage varies by
+provider; see [the quality contract](docs/cache-pricing.md#report-quality-and-provider-coverage)
+for field meanings, incomplete totals, and cache/provider limits. These are
+API-equivalent estimates, not billed spend.
 
 ### Pricing
 
@@ -284,7 +278,7 @@ Any [ISO 4217 currency code](https://en.wikipedia.org/wiki/ISO_4217#List_of_ISO_
 
 ### Model Aliases
 
-If a model shows `$0.00`, its name does not match any entry in the LiteLLM pricing data — commonly because a proxy rewrites model names. See [Pricing](#pricing) for unknown-model diagnostics and cache limitations. Map it to a model that is priced:
+If a model is reported as unpriced, its name could not be resolved in the loaded pricing data — commonly because a proxy rewrites model names. A displayed `$0.00` alone does not establish that a price is missing. See [Pricing](#pricing) for unknown-model diagnostics and cache limitations. Map an unpriced model to a model that is priced:
 
 ```bash
 codeburn model-alias "my-proxy-model" "claude-opus-4-6"   # add alias
