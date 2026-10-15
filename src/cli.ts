@@ -390,6 +390,7 @@ program
       const rangeEndStr = toDateString(periodInfo.range.end)
       let fullHistory: DailyEntry[]
       let scanProjects: ProjectSummary[]
+      let filteredCurrentSessions = 0
       const scanRange = periodInfo.range
 
       if (hasProjectFilters) {
@@ -398,6 +399,14 @@ program
         // This intentionally trades historical parse time for correct project totals.
         const historyRange: DateRange = { start: historyStart, end: now }
         const projects = fp(await parseAllSessions(historyRange, pf))
+        for (const project of projects) {
+          for (const session of project.sessions) {
+            if (session.turns.some(turn => turn.assistantCalls.some(call => {
+              const timestamp = new Date(call.timestamp)
+              return timestamp >= periodInfo.range.start && timestamp <= periodInfo.range.end
+            }))) filteredCurrentSessions += 1
+          }
+        }
         fullHistory = aggregateProjectsIntoDays(projects)
         // Optimize consumes session-level period data rather than daily aggregates.
         scanProjects = opts.optimize === false ? [] : fp(await parseAllSessions(scanRange, pf))
@@ -416,6 +425,7 @@ program
       const currentData: PeriodData = hasProjectFilters || isAllProviders
         ? buildPeriodDataFromDays(currentDays, periodInfo.label)
         : buildPeriodData(periodInfo.label, scanProjects)
+      if (hasProjectFilters) currentData.sessions = filteredCurrentSessions
 
       // PROVIDERS
       // For .all: enumerate providers with period costs + installed-but-zero.
