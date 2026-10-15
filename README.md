@@ -168,6 +168,21 @@ Daily cost chart, per-project, per-model (Opus, Sonnet, Haiku, GPT-5, GPT-4o, Ge
 
 For categories that involve code edits, CodeBurn detects edit/test/fix retry cycles (Edit, Bash, Edit patterns). The one-shot column shows the percentage of edit turns that succeeded without retries. Coding at 90% means the AI got it right first try 9 out of 10 times.
 
+### Report data quality
+
+The dashboard shows estimated usage and missing prices while it is open, including
+when it falls back to bundled snapshot prices. `report --format json` adds
+`dataQuality` counts and `pricing` metadata. `overview.completeCost` is null when
+some selected calls have missing or unaudited pricing; the existing `cost` field
+remains a numeric, potentially partial total for compatibility.
+
+Usage provenance currently distinguishes Codex token-count events from its
+character-based estimates. Other providers have unknown provenance, not observed
+usage. Pricing completeness is currently audited for Claude and Codex; other
+providers retain unknown pricing coverage. These are API-equivalent estimates,
+not billed spend. See [the quality contract](docs/cache-pricing.md#report-quality-and-provider-coverage)
+for field meanings and cache/provider limits.
+
 ### Pricing
 
 Fetched from [LiteLLM](https://github.com/BerriAI/litellm) model prices (auto-cached 24 hours at `~/.cache/codeburn/`). Handles input, output, cache write, cache read, and web search costs. Fast mode multiplier for Claude.

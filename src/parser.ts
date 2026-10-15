@@ -2,6 +2,7 @@ import { readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import { readSessionLines } from './fs-utils.js'
 import { calculateCost, getShortModelName } from './models.js'
+import { summarizeCallQuality, usagePricingStatus } from './data-quality.js'
 import { discoverAllSessions, getProvider } from './providers/index.js'
 import { flushCodexCache } from './codex-cache.js'
 import { flushAntigravityCache } from './providers/antigravity.js'
@@ -138,6 +139,7 @@ function parseApiCall(entry: JournalEntry): ParsedApiCall | null {
     model: msg.model,
     usage: tokens,
     costUSD,
+    pricingStatus: usagePricingStatus(msg.model, tokens),
     tools,
     mcpTools: extractMcpTools(tools),
     skills,
@@ -366,6 +368,7 @@ function buildSessionSummary(
     totalCacheReadTokens: totalCacheRead,
     totalCacheWriteTokens: totalCacheWrite,
     apiCalls,
+    dataQuality: summarizeCallQuality(turns.flatMap(t => t.assistantCalls)),
     turns,
     modelBreakdown,
     toolBreakdown,
@@ -502,6 +505,8 @@ function providerCallToTurn(call: ParsedProviderCall): ParsedTurn {
     model: call.model,
     usage,
     costUSD: call.costUSD,
+    ...(call.costIsEstimated !== undefined ? { costIsEstimated: call.costIsEstimated } : {}),
+    ...(call.provider === 'codex' ? { pricingStatus: usagePricingStatus(call.model, usage) } : {}),
     tools,
     mcpTools: extractMcpTools(tools),
     skills: [],

@@ -199,6 +199,9 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
           // the cold path's charging semantics, including reasoning as output.
           yield {
             ...call,
+            // v2 caches already mark every character estimate true; an absent
+            // marker on these Codex entries therefore identifies token-count usage.
+            costIsEstimated: call.costIsEstimated ?? false,
             costUSD: calculateCost(
               call.model, call.inputTokens, call.outputTokens + call.reasoningTokens,
               call.cacheCreationInputTokens, call.cacheReadInputTokens,
@@ -393,6 +396,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
             reasoningTokens,
             webSearchRequests: 0,
             costUSD,
+            costIsEstimated: false,
             tools: pendingTools,
             bashCommands: [],
             timestamp,

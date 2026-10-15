@@ -24,6 +24,7 @@ export type ParsedProviderCall = {
   reasoningTokens: number
   webSearchRequests: number
   costUSD: number
+  // Usage approximation marker; absence means provenance is unspecified.
   costIsEstimated?: boolean
   tools: string[]
   bashCommands: string[]
