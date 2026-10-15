@@ -43,3 +43,52 @@ older than yesterday, unknown and null/default model rows, and the same source
 fingerprint assertions as `tests/cli-codex-repricing.test.ts`. Cursor cache atomic
 writes and `CODEBURN_CACHE_DIR` support are additional follow-up work; neither is
 changed here.
+
+## Report quality and provider coverage
+
+`report --format json` adds `pricing` (price-table `source`: `live`, `cache`, or
+`bundled-snapshot`; `fallback`; nullable refresh failure `reason`) and `dataQuality`.
+The same quality counts are present on project rows, top-session rows, and parsed
+session summaries. Counts come from the selected calls after date/provider/project
+filters, never from the process-global warning set or the number of parsing passes.
+They therefore survive warm Codex caches and exclude hydration-only usage.
+
+Usage provenance is currently audited for Codex: `costIsEstimated: true` means the
+existing character-based token approximation, and `false` means token-count events.
+The marker survives normalized calls and session aggregation. Existing v2 parsed
+Codex cache entries already mark approximations true; other v2 Codex calls can be
+classified as observed on read without invalidating token data. Other providers
+leave the marker absent and contribute to `unknownProvenanceCalls`, not
+`observedCalls`. These labels describe usage provenance, not invoice verification,
+model-alias accuracy, or every legacy adapter's estimation policy.
+
+Per-call `pricingStatus` is currently audited for Claude and Codex, whose charging
+paths use the model lookup directly. Positive usage with no price is `unpriced`;
+a known rate (including a free rate), or genuinely zero usage, is `priced`.
+Other adapters may use provider-supplied costs or a hidden pricing model, so their
+missing status contributes to `unknownPricingCalls`; it is not classified from a
+numeric zero or from a display label. Cursor's stored-cost limitations above remain.
+
+`dataQuality` contains `observedCalls`, `estimatedCalls`,
+`unknownProvenanceCalls`, `pricedCalls`, `unpricedCalls`, `unknownPricingCalls`,
+`unpricedModels` (raw selected model names), and `costComplete`. The usage counts
+and the pricing counts each partition selected calls. `costComplete` means no
+unpriced or unaudited pricing calls remain; it does not imply observed usage or
+fresh rates. Price-table fallback is an independent dimension in `pricing`.
+
+Existing numeric cost fields are preserved for compatibility and can be partial.
+The new `overview.completeCost` is null whenever `costComplete` is false, otherwise
+it equals `overview.cost` in the active currency. Unknown amounts are never encoded
+as a measured zero in this new field. Empty selections are complete zero totals.
+
+Both interactive and static dashboards display estimated-call counts, unspecified
+provenance, missing/unaudited pricing, and snapshot fallback above the panels.
+The interactive notice follows the displayed selection and remains visible in
+comparison/optimize views; refresh loading retains the fallback warning without
+showing the previous selection's counts. Stderr diagnostics still run after exit.
+These additions apply to dashboard reports and parsed summaries; status/menubar and
+export-v2 payload schemas are unchanged in this slice.
+
+Synthetic, isolated-home behavior coverage lives in
+`tests/cli-report-quality.test.ts`, including JSON parsing, selection scope,
+cold/warm reports, the normalized parser API, and a live Ink dashboard before `q`.

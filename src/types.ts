@@ -65,11 +65,27 @@ export type ParsedTurn = {
   sessionId: string
 }
 
+export type DataQuality = {
+  observedCalls: number
+  estimatedCalls: number
+  unknownProvenanceCalls: number
+  pricedCalls: number
+  unpricedCalls: number
+  unknownPricingCalls: number
+  unpricedModels: string[]
+  // Complete means every selected call has a known amount, not that it is an invoice.
+  costComplete: boolean
+}
+
 export type ParsedApiCall = {
   provider: string
   model: string
   usage: TokenUsage
   costUSD: number
+  // Token-usage provenance: true = approximated, false = observed; absent = unaudited.
+  costIsEstimated?: boolean
+  // Currently audited for Claude and Codex only. Absence is not proof of pricing.
+  pricingStatus?: 'priced' | 'unpriced'
   tools: string[]
   mcpTools: string[]
   skills: string[]
@@ -120,6 +136,7 @@ export type SessionSummary = {
   totalCacheReadTokens: number
   totalCacheWriteTokens: number
   apiCalls: number
+  dataQuality?: DataQuality
   turns: ClassifiedTurn[]
   modelBreakdown: Record<string, { calls: number; costUSD: number; tokens: TokenUsage }>
   toolBreakdown: Record<string, { calls: number }>

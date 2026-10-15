@@ -1,7 +1,8 @@
 import { Command } from 'commander'
 import { installMenubarApp } from './menubar-installer.js'
 import { exportCsv, exportJson, type PeriodExport } from './export.js'
-import { loadPricing, setModelAliases, getUnpricedModels, isPricingStale, getPricingStaleReason } from './models.js'
+import { loadPricing, setModelAliases, getUnpricedModels, isPricingStale, getPricingStaleReason, getPricingMetadata } from './models.js'
+import { summarizeCallQuality, summarizeProjectQuality } from './data-quality.js'
 import { parseAllSessions, filterProjectsByName } from './parser.js'
 import { convertCost } from './currency.js'
 import { renderStatusBar } from './format.js'
@@ -151,6 +152,7 @@ program.hook('postAction', () => {
 
 function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: string) {
   const sessions = projects.flatMap(p => p.sessions)
+  const dataQuality = summarizeProjectQuality(projects)
   const { code } = getCurrency()
 
   const totalCostUSD = projects.reduce((s, p) => s + p.totalCostUSD, 0)
@@ -192,6 +194,7 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
       : null,
     calls: p.totalApiCalls,
     sessions: p.sessions.length,
+    dataQuality: summarizeProjectQuality([p]),
   }))
 
   const modelMap: Record<string, { calls: number; cost: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }> = {}
@@ -250,7 +253,14 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
     Object.entries(m).sort(([, a], [, b]) => b - a).map(([name, calls]) => ({ name, calls }))
 
   const topSessions = projects
-    .flatMap(p => p.sessions.map(s => ({ project: p.project, sessionId: s.sessionId, date: s.firstTimestamp ? dateKey(s.firstTimestamp) : null, cost: convertCost(s.totalCostUSD), calls: s.apiCalls })))
+    .flatMap(p => p.sessions.map(s => ({
+      project: p.project,
+      sessionId: s.sessionId,
+      date: s.firstTimestamp ? dateKey(s.firstTimestamp) : null,
+      cost: convertCost(s.totalCostUSD),
+      calls: s.apiCalls,
+      dataQuality: summarizeCallQuality(s.turns.flatMap(t => t.assistantCalls)),
+    })))
     .sort((a, b) => b.cost - a.cost)
     .slice(0, 5)
 
@@ -259,8 +269,11 @@ function buildJsonReport(projects: ProjectSummary[], period: string, periodKey: 
     currency: code,
     period,
     periodKey,
+    pricing: getPricingMetadata(),
+    dataQuality,
     overview: {
       cost: convertCost(totalCostUSD),
+      completeCost: dataQuality.costComplete ? convertCost(totalCostUSD) : null,
       calls: totalCalls,
       sessions: totalSessions,
       cacheHitPercent,

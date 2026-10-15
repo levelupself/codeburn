@@ -64,6 +64,7 @@ function setPricingCache(pricing: Map<string, ModelCosts>): void {
   pricingContextMemo = undefined
 }
 
+let pricingSource: 'live' | 'cache' | 'bundled-snapshot' = 'bundled-snapshot'
 let pricingIsStale = false
 let pricingStaleReason = ''
 
@@ -165,11 +166,13 @@ async function loadPricingOnce(): Promise<void> {
   const cached = await loadCachedPricing()
   if (cached) {
     setPricingCache(cached)
+    pricingSource = 'cache'
     return
   }
 
   try {
     setPricingCache(await fetchAndCachePricing())
+    pricingSource = 'live'
   } catch (err) {
     // The bundled snapshot is already loaded, so pricing still works -- but it is
     // frozen at publish time and will not know models released since. Record why we
@@ -187,6 +190,15 @@ export function isPricingStale(): boolean {
 
 export function getPricingStaleReason(): string {
   return pricingStaleReason
+}
+
+// Price-table origin is separate from per-call completeness and usage provenance.
+export function getPricingMetadata() {
+  return {
+    source: pricingSource,
+    fallback: pricingIsStale,
+    reason: pricingIsStale ? pricingStaleReason : null,
+  }
 }
 
 // Known model name variants that providers emit but LiteLLM/fallback don't index under.

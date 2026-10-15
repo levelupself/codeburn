@@ -5,7 +5,8 @@ import { render, Box, Text, useInput, useApp, useWindowSize } from 'ink'
 import { CATEGORY_LABELS, type DateRange, type ProjectSummary, type TaskCategory } from './types.js'
 import { formatCost, formatTokens } from './format.js'
 import { parseAllSessions, filterProjectsByName } from './parser.js'
-import { loadPricing } from './models.js'
+import { loadPricing, getPricingMetadata } from './models.js'
+import { summarizeProjectQuality } from './data-quality.js'
 import { getAllProviders } from './providers/index.js'
 import { scanAndDetect, type WasteFinding, type WasteAction, type OptimizeResult } from './optimize.js'
 import { estimateContextBudget, discoverProjectCwd, type ContextBudget } from './context-budget.js'
@@ -630,6 +631,21 @@ function DashboardContent({ projects, period, columns, activeProvider, budgets, 
   )
 }
 
+function DataQualityNotice({ projects }: { projects: ProjectSummary[] }) {
+  const quality = summarizeProjectQuality(projects)
+  const pricing = getPricingMetadata()
+  const callLabel = (count: number) => `call${count === 1 ? '' : 's'}`
+  return (
+    <Box flexDirection="column" paddingX={1}>
+      {quality.estimatedCalls > 0 && <Text color={ORANGE}>~ {quality.estimatedCalls} estimated {callLabel(quality.estimatedCalls)} (approximated tokens)</Text>}
+      {quality.unknownProvenanceCalls > 0 && <Text dimColor>{quality.unknownProvenanceCalls} {callLabel(quality.unknownProvenanceCalls)} with unknown usage provenance</Text>}
+      {quality.unpricedCalls > 0 && <Text color="yellow">Warning: {quality.unpricedCalls} unpriced {callLabel(quality.unpricedCalls)}; costs missing from totals. Models: {quality.unpricedModels.join(', ')}</Text>}
+      {quality.unknownPricingCalls > 0 && <Text color="yellow">Pricing coverage unknown for {quality.unknownPricingCalls} {callLabel(quality.unknownPricingCalls)}; total may be incomplete.</Text>}
+      {pricing.fallback && <Text color="yellow">Warning: using bundled snapshot prices; refresh failed ({pricing.reason}).</Text>}
+    </Box>
+  )
+}
+
 function InteractiveDashboard({ initialProjects, initialPeriod, initialProvider, initialPlanUsage, refreshSeconds, projectFilter, excludeFilter }: {
   initialProjects: ProjectSummary[]
   initialPeriod: Period
@@ -771,6 +787,7 @@ function InteractiveDashboard({ initialProjects, initialPeriod, initialProvider,
     return (
       <Box flexDirection="column" width={dashWidth}>
         <PeriodTabs active={period} providerName={activeProvider} showProvider={view !== 'compare' && multipleProviders} />
+        <DataQualityNotice projects={[]} />
         {view === 'compare'
           ? <Box flexDirection="column" paddingX={2} paddingY={1}>
               <Box flexDirection="column" borderStyle="round" borderColor={ORANGE} paddingX={1}>
@@ -788,6 +805,7 @@ function InteractiveDashboard({ initialProjects, initialPeriod, initialProvider,
   return (
     <Box flexDirection="column" width={dashWidth}>
       <PeriodTabs active={period} providerName={activeProvider} showProvider={multipleProviders && view !== 'compare'} />
+      <DataQualityNotice projects={projects} />
       {view === 'compare'
         ? <CompareView projects={projects} onBack={() => setView('dashboard')} />
         : view === 'optimize' && optimizeResult
@@ -804,6 +822,7 @@ function StaticDashboard({ projects, period, activeProvider, planUsage }: { proj
   return (
     <Box flexDirection="column" width={dashWidth}>
       <PeriodTabs active={period} />
+      <DataQualityNotice projects={projects} />
       <DashboardContent projects={projects} period={period} columns={columns} activeProvider={activeProvider} planUsage={planUsage} />
     </Box>
   )

@@ -168,6 +168,15 @@ Daily cost chart, per-project, per-model (Opus, Sonnet, Haiku, GPT-5, GPT-4o, Ge
 
 For categories that involve code edits, CodeBurn detects edit/test/fix retry cycles (Edit, Bash, Edit patterns). The one-shot column shows the percentage of edit turns that succeeded without retries. Coding at 90% means the AI got it right first try 9 out of 10 times.
 
+### Report data quality
+
+The dashboard shows estimated usage and missing prices while it is open, including
+when it falls back to bundled snapshot prices. `report --format json` exposes
+quality counts and pricing metadata for automated consumers. Coverage varies by
+provider; see [the quality contract](docs/cache-pricing.md#report-quality-and-provider-coverage)
+for field meanings, incomplete totals, and cache/provider limits. These are
+API-equivalent estimates, not billed spend.
+
 ### Pricing
 
 Fetched from [LiteLLM](https://github.com/BerriAI/litellm) model prices (auto-cached 24 hours at `~/.cache/codeburn/`). Handles input, output, cache write, cache read, and web search costs. Fast mode multiplier for Claude.
@@ -269,7 +278,7 @@ Any [ISO 4217 currency code](https://en.wikipedia.org/wiki/ISO_4217#List_of_ISO_
 
 ### Model Aliases
 
-If a model shows `$0.00`, its name does not match any entry in the LiteLLM pricing data — commonly because a proxy rewrites model names. See [Pricing](#pricing) for unknown-model diagnostics and cache limitations. Map it to a model that is priced:
+If a model is reported as unpriced, its name could not be resolved in the loaded pricing data — commonly because a proxy rewrites model names. A displayed `$0.00` alone does not establish that a price is missing. See [Pricing](#pricing) for unknown-model diagnostics and cache limitations. Map an unpriced model to a model that is priced:
 
 ```bash
 codeburn model-alias "my-proxy-model" "claude-opus-4-6"   # add alias
