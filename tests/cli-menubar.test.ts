@@ -29,11 +29,11 @@ async function writeClaude(project: string, id: string, offset: number, tokens: 
 }
 
 async function writeCodex() {
-  const dir = join(home, '.codex', 'sessions')
+  const dir = join(home, '.codex', 'sessions', ...day(-1).slice(0, 10).split('-'))
   await mkdir(dir, { recursive: true })
   const records = [
     { type: 'session_meta', timestamp: day(-1), payload: {
-      cwd: join(home, 'alpha'), session_id: 'codex-alpha', model: 'claude-sonnet-4-5',
+      cwd: join(home, 'alpha'), originator: 'codex-cli', session_id: 'codex-alpha', model: 'claude-sonnet-4-5',
     } },
     { type: 'event_msg', timestamp: day(-1), payload: {
       type: 'token_count', info: {
@@ -107,7 +107,6 @@ describe.each(['cold', 'warm'])('menubar CLI with %s aggregate cache', (cacheSta
 
   it('combines project and provider filters across current and history', async () => {
     await writeCodex()
-    expectScope(menubar(['--project', 'alpha']), 0.405, 3, 0.36)
     const claude = menubar(['--project', 'alpha', '--provider', 'claude'])
     expectScope(claude, 0.36, 2, 0.315)
     expect(claude.current.providers).toEqual({ claude: expect.closeTo(0.36, 6) })
@@ -115,6 +114,7 @@ describe.each(['cold', 'warm'])('menubar CLI with %s aggregate cache', (cacheSta
     expectScope(codex, 0.045, 1, 0.045)
     expect(codex.current.providers).toEqual({ codex: expect.closeTo(0.045, 6) })
     expectScope(menubar(['--project', 'beta', '--provider', 'codex']), 0, 0, 0)
+    expectScope(menubar(['--project', 'alpha']), 0.405, 3, 0.36)
   })
 })
 
