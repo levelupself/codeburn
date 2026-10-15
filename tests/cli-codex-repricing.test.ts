@@ -101,7 +101,11 @@ describe('Codex CLI repricing across separate processes', () => {
   }, 30_000)
 
   it('refreshes historical daily totals after alias and effective price changes', async () => {
-    status()
+    const historyArgs = ['status', '--format', 'menubar-json', '--period', 'all', '--no-optimize']
+    for (const result of [cli(historyArgs), cli(historyArgs)]) {
+      expect(result.stderr).toContain('no known price')
+      expect(result.stderr).toContain(unknown)
+    }
     const dayCost = () => status().history.daily.find((d: { date: string }) => d.date === date)?.cost
     expect(dayCost()).toBe(0)
     cli(['model-alias', unknown, 'claude-sonnet-4-5'])

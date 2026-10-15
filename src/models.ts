@@ -1,4 +1,5 @@
 import { readFile, writeFile, mkdir } from 'fs/promises'
+import { createHash } from 'crypto'
 import { join } from 'path'
 import { homedir } from 'os'
 import snapshotData from './data/litellm-snapshot.json'
@@ -60,6 +61,7 @@ const modelCostsMemo = new Map<string, ModelCosts | null>()
 function setPricingCache(pricing: Map<string, ModelCosts>): void {
   pricingCache = pricing
   modelCostsMemo.clear()
+  pricingContextMemo = undefined
 }
 
 let pricingIsStale = false
@@ -241,6 +243,30 @@ let userAliases: Record<string, string> = {}
 export function setModelAliases(aliases: Record<string, string>): void {
   userAliases = aliases
   modelCostsMemo.clear()
+  pricingContextMemo = undefined
+}
+
+// Derived caches must match the actual loaded rates and aliases, including removal.
+// Hash values rather than timestamps so a renewed identical price table stays warm.
+let pricingContextMemo: string | undefined
+
+export function getPricingContext(): string {
+  pricingContextMemo ??= createHash('sha256').update(JSON.stringify({
+    prices: [...pricingCache].sort(([a], [b]) => a.localeCompare(b)).map(([name, c]) => [
+      name, c.inputCostPerToken, c.outputCostPerToken, c.cacheWriteCostPerToken,
+      c.cacheReadCostPerToken, c.webSearchCostPerRequest, c.fastMultiplier,
+    ]),
+    builtinAliases: Object.entries(BUILTIN_ALIASES).sort(([a], [b]) => a.localeCompare(b)),
+    userAliases: Object.entries(userAliases).sort(([a], [b]) => a.localeCompare(b)),
+  })).digest('hex')
+  return pricingContextMemo
+}
+
+// Replay diagnostics from a derived cache only under its matching pricing context.
+export function restoreUnpricedModels(models: string[]): void {
+  for (const model of models) {
+    if (!getModelCosts(model)) recordUnpriced(model)
+  }
 }
 
 function resolveAlias(model: string): string {
