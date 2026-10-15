@@ -12,7 +12,8 @@
   ],
   "scripts": {
     "bundle-litellm": "node scripts/bundle-litellm.mjs",
-    "build": "node scripts/bundle-litellm.mjs && tsup",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
     "dev": "tsx src/cli.ts",
     "test": "vitest",
     "prepublishOnly": "npm run build"
@@ -30,7 +31,7 @@
     "developer-tools"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "author": "AgentSeal <hello@agentseal.org>",
   "license": "MIT",

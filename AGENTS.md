@@ -2,7 +2,7 @@
 
 This file is the project's committed home for project-intrinsic agent knowledge: build, test, release, architecture, and sharp-edge notes that should travel with the code.
 
-- Run the full local suite with `npm test -- --run`; `npm run build` builds the CLI.
+- Run the full local suite with `npm test -- --run`; `npm run typecheck` checks production types and `npm run build` builds offline from the committed snapshot. See README Development for the explicit price-refresh workflow and Node/SQLite support floor.
 - Pricing/cache and report-quality contracts, including provider coverage limits and the remaining Cursor cache work, are in `docs/cache-pricing.md`; process-isolated regressions are in `tests/cli-codex-repricing.test.ts` and `tests/cli-report-quality.test.ts`.
 - Codex cache persistence and source fingerprint validation live in `src/codex-cache.ts`; failure recovery tests are in `tests/codex-cache-write.test.ts`. Use `CODEBURN_CACHE_DIR` to isolate cache experiments from real data.
 
