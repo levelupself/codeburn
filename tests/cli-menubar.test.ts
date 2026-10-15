@@ -87,6 +87,30 @@ beforeEach(async () => {
 
 afterEach(async () => { await rm(home, { recursive: true, force: true }) })
 
+it.each([
+  ['--project', 'alpha'],
+  ['--exclude', 'beta'],
+  ['--project', 'alpha', '--provider', 'claude'],
+])('counts sessions active across the current period boundary for %j', async (...filters) => {
+  const dir = join(home, '.claude', 'projects', 'alpha')
+  const yesterdayPath = join(dir, 'alpha-yesterday.jsonl')
+  const todayPath = join(dir, 'alpha-today.jsonl')
+  const yesterday = await readFile(yesterdayPath, 'utf-8')
+  const today = (await readFile(todayPath, 'utf-8')).split('\n').filter(Boolean).map(line => {
+    return JSON.stringify({ ...JSON.parse(line), sessionId: 'alpha-yesterday' })
+  }).join('\n')
+  await writeFile(yesterdayPath, yesterday + today + '\n')
+  await rm(todayPath)
+
+  const payload = menubar(filters, 'today')
+  expect(payload.current.cost).toBeCloseTo(0.045, 6)
+  expect(payload.current.calls).toBe(1)
+  expect(payload.current.sessions).toBe(1)
+  const week = menubar(filters, 'week')
+  expect(week.current.calls).toBe(2)
+  expect(week.current.sessions).toBe(1)
+})
+
 describe.each(['cold', 'warm'])('menubar CLI with %s aggregate cache', (cacheState) => {
   beforeEach(() => {
     if (cacheState === 'warm') expectScope(menubar(), 1.275, 3, 1.23)
