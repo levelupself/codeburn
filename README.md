@@ -291,6 +291,8 @@ codeburn export --project inventory              # export only "inventory" proje
 
 Filter by provider, project name (case-insensitive substring), or exact date range. The `--project` and `--exclude` flags work on all commands and can be combined with `--provider`.
 
+For `status --format menubar-json`, project filters apply to current totals, provider costs, and daily history. Filtered requests parse historical sessions because the shared daily cache stores totals without project identity; these requests can be slower. Requests without project filters keep using the fast aggregate cache.
+
 ```bash
 codeburn report --from 2026-04-01 --to 2026-04-10   # explicit window
 codeburn report --from 2026-04-01                    # this date through today
