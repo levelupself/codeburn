@@ -174,7 +174,7 @@ Fetched from [LiteLLM](https://github.com/BerriAI/litellm) model prices (auto-ca
 
 A full LiteLLM price snapshot is bundled at publish time, so every model in it prices correctly with no network at all. If the refresh fails (offline, proxy, `raw.githubusercontent.com` unreachable), CodeBurn falls back to that snapshot and says so on stderr instead of quietly serving prices it could not verify. A model name that matches no price entry exactly resolves to the longest matching prefix, so a lookup never depends on LiteLLM's arbitrary key ordering.
 
-A model CodeBurn cannot price is counted as `$0.00`, which reads exactly like "this was free". So after every command it names the unpriced models on stderr — stderr specifically, so `--format json` stdout stays machine-readable — and points at the per-model breakdown, which shows their real call counts against `$0.00`. See [Model Aliases](#model-aliases) to price one yourself.
+A model CodeBurn cannot price is counted as `$0.00`, which reads exactly like "this was free". So after every command it names the unpriced models on stderr — stderr specifically, so `--format json` stdout stays machine-readable — and points at the per-model breakdown, which shows their real call counts against `$0.00`. See [Model Aliases](#model-aliases) to price one yourself. Cache-specific guarantees and the remaining Cursor limitation are documented in the [pricing and cache contract](docs/cache-pricing.md).
 
 ### Optimize
 
@@ -269,7 +269,7 @@ Any [ISO 4217 currency code](https://en.wikipedia.org/wiki/ISO_4217#List_of_ISO_
 
 ### Model Aliases
 
-If a model shows `$0.00`, its name does not match any entry in the LiteLLM pricing data — commonly because a proxy rewrites model names. CodeBurn names every such model on stderr after the command, so you never have to spot the zero yourself. Map it to a model that is priced:
+If a model shows `$0.00`, its name does not match any entry in the LiteLLM pricing data — commonly because a proxy rewrites model names. See [Pricing](#pricing) for unknown-model diagnostics and cache limitations. Map it to a model that is priced:
 
 ```bash
 codeburn model-alias "my-proxy-model" "claude-opus-4-6"   # add alias
