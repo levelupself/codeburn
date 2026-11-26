@@ -2,8 +2,11 @@ import { spawnSync } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MenubarPayload } from '../src/menubar-json.js'
+
+// Cases launch multiple CLI processes; startup time varies on shared CI runners.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 })
 
 let home: string
 
