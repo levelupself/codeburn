@@ -65,7 +65,7 @@ function loadDriver(): boolean {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     loadError =
-      'SQLite-based providers (Cursor, OpenCode) need Node 22+ with the node:sqlite module.\n' +
+      'SQLite-based providers (Cursor, OpenCode) need Node 22.13.0+ with the node:sqlite module.\n' +
       `Current Node: ${process.version}.\n` +
       'Upgrade Node (https://nodejs.org) and run codeburn again.\n' +
       `(underlying error: ${message})`
