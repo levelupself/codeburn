@@ -38,9 +38,9 @@ Everything runs locally. No wrapper, no proxy, no API keys. CodeBurn reads sessi
 
 ## Requirements
 
-- Node.js 20+
+- Node.js 22.13.0+ (CI covers Node 22 and 24)
 - At least one supported AI coding tool with session data on disk
-- For Cursor and OpenCode support, `better-sqlite3` is installed automatically as an optional dependency
+- SQLite providers (Cursor, OpenCode, Goose, and cursor-agent) use built-in `node:sqlite`; no native addon is needed. Node 22.13.0 is the minimum for loading SQLite without an experimental flag.
 
 ## Install
 
@@ -70,7 +70,7 @@ codeburn                        # interactive dashboard (default: 7 days)
 codeburn today                  # today's usage
 codeburn month                  # this month's usage
 codeburn report -p 30days       # rolling 30-day window
-codeburn report -p all          # every recorded session
+codeburn report -p all          # six calendar months
 codeburn report --from 2026-04-01 --to 2026-04-10  # exact date range
 codeburn report --format json   # full dashboard data as JSON
 codeburn report --refresh 60    # auto-refresh every 60s (default: 30s)
@@ -114,7 +114,7 @@ Paths shown are for macOS. Linux and Windows equivalents are detected automatica
 
 CodeBurn auto-detects which AI coding tools you use. If multiple providers have session data on disk, press `p` in the dashboard to toggle between them.
 
-The `--provider` flag filters any command to a single provider: `codeburn report --provider claude`, `codeburn today --provider codex`, `codeburn export --provider cursor`. Works on all commands: `report`, `today`, `month`, `status`, `export`, `optimize`, `compare`, `yield`.
+The `--provider` flag filters `report`, `today`, `month`, `status`, `export`, `optimize`, and `compare` to a single provider: `codeburn report --provider claude`, `codeburn today --provider codex`, `codeburn export --provider cursor`. `yield` supports `--period` (`-p`) only.
 
 ### Provider Notes
 
@@ -181,7 +181,7 @@ API-equivalent estimates, not billed spend.
 
 Fetched from [LiteLLM](https://github.com/BerriAI/litellm) model prices (auto-cached 24 hours at `~/.cache/codeburn/`). Handles input, output, cache write, cache read, and web search costs. Fast mode multiplier for Claude.
 
-A full LiteLLM price snapshot is bundled at publish time, so every model in it prices correctly with no network at all. If the refresh fails (offline, proxy, `raw.githubusercontent.com` unreachable), CodeBurn falls back to that snapshot and says so on stderr instead of quietly serving prices it could not verify. A model name that matches no price entry exactly resolves to the longest matching prefix, so a lookup never depends on LiteLLM's arbitrary key ordering.
+A committed LiteLLM price snapshot is bundled with the CLI; its maintenance workflow is described in [Development](#development). Models in it can be priced without network access. If the runtime refresh fails (offline, proxy, `raw.githubusercontent.com` unreachable), CodeBurn falls back to that snapshot and says so on stderr instead of quietly serving prices it could not verify. A model name that matches no price entry exactly resolves to the longest matching prefix, so a lookup never depends on LiteLLM's arbitrary key ordering.
 
 A model CodeBurn cannot price is counted as `$0.00`, which reads exactly like "this was free". So after every command it names the unpriced models on stderr — stderr specifically, so `--format json` stdout stays machine-readable — and points at the per-model breakdown, which shows their real call counts against `$0.00`. See [Model Aliases](#model-aliases) to price one yourself. Cache-specific guarantees and the remaining Cursor limitation are documented in the [pricing and cache contract](docs/cache-pricing.md).
 
@@ -298,7 +298,7 @@ codeburn month --project api --project web       # include multiple projects
 codeburn export --project inventory              # export only "inventory" project data
 ```
 
-Filter by provider, project name (case-insensitive substring), or exact date range. The `--project` and `--exclude` flags work on all commands and can be combined with `--provider`.
+Filter by provider, project name (case-insensitive substring), or exact date range. The `--project` and `--exclude` flags work on `report`, `today`, `month`, `status`, and `export`, and can be combined with `--provider`. `yield` supports `--period` only.
 
 For `status --format menubar-json`, project filters apply to current totals, provider costs, and daily history. Filtered requests parse historical sessions because the shared daily cache stores totals without project identity; these requests can be slower. Requests without project filters keep using the fast aggregate cache.
 
@@ -373,7 +373,7 @@ These are starting points, not verdicts. A 60% cache hit on a single experimenta
 
 Codex parsed results are cached in `~/.cache/codeburn/codex-results.json` (override with `CODEBURN_CACHE_DIR`). Entries are reused only when the source session's size and modification time still match. A failed cache update emits a warning on stderr that the disk cache may be stale; the last complete file is preserved and freshly parsed results remain available for the current report. Temporary files from dead writers are reported and removed during cache loading and flushing. Legacy temporary files without a process ID are reported immediately and removed on a later cache load or flush once they are at least 24 hours old; files with a live PID (including a reused PID) are left alone. External programs reading the JSON file directly bypass these diagnostics and fingerprint checks; the persisted snapshot is not a live query interface.
 
-**Cursor** stores session data in a SQLite database at `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` (macOS), `~/.config/Cursor/User/globalStorage/state.vscdb` (Linux), or `%APPDATA%/Cursor/User/globalStorage/state.vscdb` (Windows). Token counts are in `cursorDiskKV` table entries with `bubbleId:` key prefix. Requires `better-sqlite3` (installed as optional dependency). Parsed results are cached at `~/.cache/codeburn/cursor-results.json` and auto-invalidate when the database changes.
+**Cursor** stores session data in a SQLite database at `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` (macOS), `~/.config/Cursor/User/globalStorage/state.vscdb` (Linux), or `%APPDATA%/Cursor/User/globalStorage/state.vscdb` (Windows). Token counts are in `cursorDiskKV` table entries with `bubbleId:` key prefix. Uses built-in `node:sqlite`. Parsed results are cached at `~/.cache/codeburn/cursor-results.json` and auto-invalidate when the database changes.
 
 **OpenCode** stores sessions in SQLite databases at `~/.local/share/opencode/opencode*.db`. CodeBurn queries the `session`, `message`, and `part` tables read-only, extracts token counts and tool usage, and recalculates cost using the LiteLLM pricing engine. Falls back to OpenCode's own cost field for models not in our pricing data. Subtask sessions (`parent_id IS NOT NULL`) are excluded to avoid double counting. Supports multiple channel databases and respects `XDG_DATA_HOME`.
 
@@ -396,6 +396,31 @@ CodeBurn deduplicates messages (by API message ID for Claude, by cumulative toke
 | `FACTORY_DIR` | Override Droid data directory (default: `~/.factory`) |
 | `QWEN_DATA_DIR` | Override Qwen data directory (default: `~/.qwen/projects`) |
 
+## Development
+
+Use Node.js 22.13.0+ and the committed lockfile:
+
+```bash
+npm ci
+npm test -- --run
+npm run typecheck            # production src/ with strict TypeScript settings
+npm run build                # offline; bundles committed src/data/litellm-snapshot.json
+node dist/cli.js --help
+```
+
+CI runs these checks on Node 22.13.0 (the SQLite floor), current Node 22, and Node 24, alongside Semgrep. Node [22.13.0 unflagged node:sqlite](https://nodejs.org/en/blog/release/v22.13.0); earlier Node 22 releases need an experimental flag and are unsupported here.
+
+Price updates are an explicit maintainer action requiring network access:
+
+```bash
+npm run bundle-litellm
+git diff -- src/data/litellm-snapshot.json
+npm test -- --run
+npm run build
+```
+
+Review and commit the snapshot diff separately. Normal builds and `prepublishOnly` use the committed snapshot and never refresh it. Runtime reports retain their live pricing/cache behavior described in [Pricing](#pricing).
+
 ## Project Structure
 
 ```
@@ -414,7 +439,7 @@ src/
   export.ts         CSV/JSON multi-period export
   config.ts         Config file management (~/.config/codeburn/)
   currency.ts       Currency conversion, exchange rates
-  sqlite.ts         SQLite adapter (lazy-loads better-sqlite3)
+  sqlite.ts         SQLite adapter (lazy-loads node:sqlite)
   optimize.ts       Waste pattern detection engine
   providers/
     types.ts        Provider interface definitions

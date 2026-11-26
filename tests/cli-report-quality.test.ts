@@ -128,7 +128,7 @@ describe('report data quality', () => {
     const child = spawn(process.execPath, [
       '--require', resolve('tests/fixtures/interactive-tty.cjs'), ...baseArgs,
       'report', '--provider', 'codex', '--refresh', '0',
-    ], { env: env(), stdio: ['pipe', 'pipe', 'pipe'] })
+    ], { env: { ...env(), CI: 'true', CONTINUOUS_INTEGRATION: 'true' }, stdio: ['pipe', 'pipe', 'pipe'] })
     let output = ''
     let stderr = ''
     child.stdout.on('data', chunk => { output += chunk })

@@ -6,6 +6,29 @@ on:
   pull_request:
 
 jobs:
+  product:
+    name: Product (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.13.0', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Require built-in SQLite (provider tests must not skip)
+        run: node -e "require('node:sqlite')"
+      - run: npm test -- --run
+      - run: npm run typecheck
+      - run: npm run build
+      - run: node dist/cli.js --help
+      - name: Check tracked files stayed unchanged
+        run: git diff --exit-code HEAD
+
   semgrep:
     runs-on: ubuntu-latest
     steps:

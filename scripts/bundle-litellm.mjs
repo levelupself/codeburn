@@ -2,6 +2,8 @@ import { writeFileSync, mkdirSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 
+// Explicit maintainer refresh only: npm run bundle-litellm, then review the diff.
+// Normal builds consume the committed snapshot without fetching prices.
 const LITELLM_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const outPath = join(__dirname, '..', 'src', 'data', 'litellm-snapshot.json')

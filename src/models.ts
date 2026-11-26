@@ -175,7 +175,7 @@ async function loadPricingOnce(): Promise<void> {
     pricingSource = 'live'
   } catch (err) {
     // The bundled snapshot is already loaded, so pricing still works -- but it is
-    // frozen at publish time and will not know models released since. Record why we
+    // frozen at its last maintainer refresh and may lack newer models. Record why we
     // fell back so the CLI can say so instead of quietly reporting stale (or zero)
     // costs. Silently swallowing this is how "$0.00 for 546 calls" used to happen.
     pricingIsStale = true

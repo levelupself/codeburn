@@ -1,10 +1,9 @@
-import { describe, it, expect, beforeAll, afterEach } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 
-import { getModelCosts, getShortModelName, calculateCost, loadPricing, setModelAliases } from '../src/models.js'
+import { getModelCosts, getShortModelName, calculateCost, setModelAliases } from '../src/models.js'
 
-beforeAll(async () => {
-  await loadPricing()
-})
+// Test the committed snapshot loaded at import, independent of live prices or
+// a maintainer's home cache. Runtime refresh is covered by CLI pricing tests.
 
 afterEach(() => setModelAliases({}))
 
