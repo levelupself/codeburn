@@ -60,11 +60,13 @@ describe('getDateRange', () => {
   })
 
   it('"30days" returns 30 days back', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 10, 25, 12))
     const { range, label } = getDateRange('30days')
     expect(label).toBe('Last 30 Days')
-    const diffDays = (range.end.getTime() - range.start.getTime()) / (1000 * 60 * 60 * 24)
-    expect(diffDays).toBeGreaterThanOrEqual(30)
-    expect(diffDays).toBeLessThanOrEqual(31)
+    // Calendar days can include a DST transition and need not be 24 hours long.
+    expect(range.start).toEqual(new Date(2026, 9, 26))
+    expect(range.end).toEqual(new Date(2026, 10, 25, 23, 59, 59, 999))
   })
 
   it('"today" starts at local midnight', () => {
